@@ -26,7 +26,7 @@ export default function World({ focusId }: { focusId: string | null }) {
   const [selected, setSelected] = useState<{ c: Campaign; v: number } | null>(null);
   const [teleport, setTeleport] = useState<Pose | null>(null);
   const [seen, setSeen] = useState(0);
-  const [listOpen, setListOpen] = useState(true);
+  const [listOpen, setListOpen] = useState(false);
   const pose = useRef<Pose>({ ...SPAWN });
   const tracker = useMemo(() => (me ? new Tracker(me.id) : null), [me]);
 
@@ -199,7 +199,7 @@ export default function World({ focusId }: { focusId: string | null }) {
 
       {!selected && (
         <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-control bg-surface px-4 py-2 text-sm text-fg-2 shadow-menu max-md:hidden">
-          Walk with WASD or the arrows, drag to look, click a billboard to open it
+          Walk with WASD or click the ground, scroll to zoom, click a billboard to open it
         </p>
       )}
 

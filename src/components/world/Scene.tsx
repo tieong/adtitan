@@ -10,6 +10,7 @@ import manifest from "../../../public/city/manifest.json";
 import { BLOCK, HALF, LIMIT, ROAD, SPACING, blocks, collide, neighbours, nodes, props, slots, type Slot, type SpriteName } from "./city";
 import { AD_H, AD_W, paintAd, paintPlaceholder } from "./paint";
 import type { Tracker } from "./tracker";
+import { findPath } from "./path";
 
 // Isometric camera: 45 degrees around, 30 degrees above the ground.
 export const PITCH = Math.PI / 6;
@@ -78,6 +79,14 @@ function BlobShadow({ radius, opacity = 0.18 }: { radius: number; opacity?: numb
 // ---------- Ground ----------
 
 function Ground({ onPick }: { onPick: (p: THREE.Vector3) => void }) {
+  // Press and hold to keep walking toward the pointer; re-aim at most every 150ms.
+  const holding = useRef(false);
+  const lastAim = useRef(0);
+  useEffect(() => {
+    const up = () => (holding.current = false);
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
   const dashes = useMemo(() => {
     const out: { x: number; z: number; rot: boolean }[] = [];
     for (let k = -HALF; k <= HALF + 1; k++) {
@@ -93,9 +102,16 @@ function Ground({ onPick }: { onPick: (p: THREE.Vector3) => void }) {
   }, []);
   return (
     <group
-      onClick={(e) => {
-        if (e.delta > 6) return;
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
         e.stopPropagation();
+        holding.current = true;
+        lastAim.current = performance.now();
+        onPick(e.point);
+      }}
+      onPointerMove={(e) => {
+        if (!holding.current || performance.now() - lastAim.current < 150) return;
+        lastAim.current = performance.now();
         onPick(e.point);
       }}
     >
@@ -306,9 +322,18 @@ function PlazaScreen({ onSelect }: { onSelect: (c: Campaign, v: number) => void 
   }, [ads, i, video]);
   useEffect(() => () => video.pause(), [video]);
 
+  // Show the clip only once it has a frame; until then the screen shows the ad poster.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    setReady(false);
+    const on = () => setReady(true);
+    video.addEventListener("loadeddata", on);
+    return () => video.removeEventListener("loadeddata", on);
+  }, [video, i]);
   const W = 5.4;
   const H = 9.6;
   const current = ads.length ? ads[i % ads.length] : null;
+  const poster = useAdTexture(current?.campaign ?? null, 0, 0);
   return (
     <group position={[-1.5, 0.25, -1.5]} rotation-y={YAW}>
       <mesh position-y={2.5}>
@@ -327,7 +352,7 @@ function PlazaScreen({ onSelect }: { onSelect: (c: Campaign, v: number) => void 
         }}
       >
         <planeGeometry args={[W, H]} />
-        {ads.length ? <meshBasicMaterial map={texture} toneMapped={false} /> : <meshBasicMaterial color="#11141b" />}
+        <meshBasicMaterial map={ready ? texture : poster} toneMapped={false} />
       </mesh>
     </group>
   );
@@ -350,38 +375,60 @@ function facingFor(dx: number, dz: number, prev: Facing): Facing {
 function Character({
   avatar,
   pos,
-  moving,
   label,
 }: {
   avatar: string;
   pos: React.RefObject<{ x: number; z: number; dx: number; dz: number }>;
-  moving: React.RefObject<boolean>;
+  /** Kept for callers; the walk cycle now follows the distance actually covered. */
+  moving?: React.RefObject<boolean>;
   label?: React.ReactNode;
 }) {
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const [facing, setFacing] = useState<Facing>({ front: true, flip: false });
-  const facingRef = useRef(facing);
-  const phase = useMemo(() => Math.random() * 10, []);
+  const anim = useRef({
+    facing: { front: true, flip: false } as Facing,
+    pending: null as Facing | null,
+    pendingFor: 0,
+    stride: Math.random() * 10,
+    amount: 0,
+    lx: NaN,
+    lz: NaN,
+  });
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, rawDt) => {
+    const dt = Math.min(rawDt, 0.05);
     const p = pos.current;
+    const a = anim.current;
     if (!root.current || !body.current) return;
     root.current.position.set(p.x, 0.25, p.z);
-    const t = clock.elapsedTime * 9 + phase;
-    if (moving.current) {
-      body.current.position.y = Math.abs(Math.sin(t)) * 0.28;
-      body.current.rotation.z = Math.sin(t) * 0.05;
-      body.current.scale.set(1, 1 - Math.abs(Math.cos(t)) * 0.03, 1);
-      const f = facingFor(p.dx, p.dz, facingRef.current);
-      if (f.front !== facingRef.current.front || f.flip !== facingRef.current.flip) {
-        facingRef.current = f;
-        setFacing(f);
-      }
-    } else {
-      body.current.position.y = 0;
-      body.current.rotation.z = 0;
-      body.current.scale.set(1, 1 + Math.sin(clock.elapsedTime * 2 + phase) * 0.012, 1);
+    const step = Number.isNaN(a.lx) ? 0 : Math.hypot(p.x - a.lx, p.z - a.lz);
+    a.lx = p.x;
+    a.lz = p.z;
+    // amount eases between standing (0) and walking (1) so starts and stops do not pop.
+    const walking = step > 0.002;
+    a.amount += ((walking ? 1 : 0) - a.amount) * (1 - Math.exp(-dt * 10));
+    a.stride += step / 0.55;
+    const swing = Math.sin(a.stride * Math.PI);
+    body.current.position.y = Math.abs(swing) * 0.22 * a.amount;
+    body.current.rotation.z = swing * 0.045 * a.amount;
+    const breathe = Math.sin(clock.elapsedTime * 2.2 + a.stride) * 0.012 * (1 - a.amount);
+    body.current.scale.set(1, 1 + breathe - Math.abs(Math.cos(a.stride * Math.PI)) * 0.025 * a.amount, 1);
+    // Only turn once the new direction has held for a moment, so the sprite does not flicker.
+    if (walking) {
+      const f = facingFor(p.dx, p.dz, a.facing);
+      if (f.front !== a.facing.front || f.flip !== a.facing.flip) {
+        if (a.pending && a.pending.front === f.front && a.pending.flip === f.flip) a.pendingFor += dt;
+        else {
+          a.pending = f;
+          a.pendingFor = 0;
+        }
+        if (a.pendingFor > 0.09) {
+          a.facing = f;
+          a.pending = null;
+          setFacing(f);
+        }
+      } else a.pending = null;
     }
   });
 
@@ -392,7 +439,7 @@ function Character({
         <Standee name={`${avatar}-${facing.front ? "front" : "back"}`} width={1.9} flip={facing.flip} />
       </group>
       {label && (
-        <Html position={[0, 4.4, 0]} center distanceFactor={undefined} zIndexRange={[10, 0]}>
+        <Html position={[0, 4.4, 0]} center zIndexRange={[10, 0]}>
           {label}
         </Html>
       )}
@@ -491,13 +538,19 @@ function Me({
   const keys = useRef(new Set<string>());
   const { camera, gl } = useThree();
   const pos = useRef({ x: pose.current.x, z: pose.current.z, dx: 1, dz: 1 });
-  const moving = useRef(false);
+  const vel = useRef(new THREE.Vector2());
+  const path = useRef<{ x: number; z: number }[]>([]);
+  const aimed = useRef<THREE.Vector3 | null>(null);
   const look = useRef(new THREE.Vector3(pose.current.x, 0, pose.current.z));
+  const zoom = useRef((camera as THREE.OrthographicCamera).zoom);
 
   useEffect(() => {
     if (!teleport) return;
     pose.current = { ...teleport };
     pos.current = { ...pos.current, x: teleport.x, z: teleport.z };
+    look.current.set(teleport.x, 0, teleport.z);
+    vel.current.set(0, 0);
+    path.current = [];
     target.current = null;
   }, [teleport, pose, target]);
 
@@ -518,61 +571,85 @@ function Me({
     };
   }, []);
 
-  // Wheel zoom on the orthographic camera.
+  // Wheel and pinch zoom ease toward the requested level.
   useEffect(() => {
     const el = gl.domElement;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      const cam = camera as THREE.OrthographicCamera;
-      cam.zoom = THREE.MathUtils.clamp(cam.zoom * (e.deltaY > 0 ? 0.9 : 1.1), 9, 40);
-      cam.updateProjectionMatrix();
+      zoom.current = THREE.MathUtils.clamp(zoom.current * Math.exp(-e.deltaY * 0.0015), 10, 42);
     };
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
-  }, [camera, gl]);
+  }, [gl]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const k = keys.current;
     const p = pose.current;
-    const upKey = k.has("w") || k.has("z") || k.has("arrowup") ? 1 : 0;
-    const downKey = k.has("s") || k.has("arrowdown") ? 1 : 0;
-    const leftKey = k.has("a") || k.has("q") || k.has("arrowleft") ? 1 : 0;
-    const rightKey = k.has("d") || k.has("arrowright") ? 1 : 0;
-    const sy = upKey - downKey;
-    const sx = rightKey - leftKey;
-    const speed = (k.has("shift") ? 16 : 9) * dt;
-    let mx = (SCREEN_UP.x * sy + SCREEN_RIGHT.x * sx) * speed;
-    let mz = (SCREEN_UP.y * sy + SCREEN_RIGHT.y * sx) * speed;
-    if (sx && sy) {
-      mx *= Math.SQRT1_2;
-      mz *= Math.SQRT1_2;
+    const run = k.has("shift");
+    const maxSpeed = run ? 14 : 8;
+
+    // A new click target becomes a path around the solids.
+    if (target.current !== aimed.current) {
+      aimed.current = target.current;
+      path.current = target.current ? findPath(p.x, p.z, target.current.x, target.current.z) : [];
     }
-    if (sx || sy) target.current = null;
-    else if (target.current) {
-      const dx = target.current.x - p.x;
-      const dz = target.current.z - p.z;
+
+    const sy = (k.has("w") || k.has("z") || k.has("arrowup") ? 1 : 0) - (k.has("s") || k.has("arrowdown") ? 1 : 0);
+    const sx = (k.has("d") || k.has("arrowright") ? 1 : 0) - (k.has("a") || k.has("q") || k.has("arrowleft") ? 1 : 0);
+    const want = new THREE.Vector2();
+    if (sx || sy) {
+      want.set(SCREEN_UP.x * sy + SCREEN_RIGHT.x * sx, SCREEN_UP.y * sy + SCREEN_RIGHT.y * sx).normalize().multiplyScalar(maxSpeed);
+      path.current = [];
+      target.current = null;
+      aimed.current = null;
+    } else if (path.current.length) {
+      const next = path.current[0];
+      const dx = next.x - p.x;
+      const dz = next.z - p.z;
       const d = Math.hypot(dx, dz);
-      if (d < 0.3) target.current = null;
-      else {
-        const s = Math.min(d, 10 * dt);
-        mx = (dx / d) * s;
-        mz = (dz / d) * s;
+      const last = path.current.length === 1;
+      if (d < (last ? 0.15 : 0.6)) {
+        path.current.shift();
+        if (!path.current.length) {
+          target.current = null;
+          aimed.current = null;
+        }
+      } else {
+        // Slow down over the last couple of units instead of stopping dead.
+        const speed = last ? Math.min(maxSpeed, d * 4 + 1) : maxSpeed;
+        want.set(dx / d, dz / d).multiplyScalar(speed);
       }
     }
-    moving.current = !!(mx || mz);
-    if (moving.current) {
-      [p.x, p.z] = collide(p.x + mx, p.z + mz);
-      p.ry = Math.atan2(mx, mz);
-      pos.current = { x: p.x, z: p.z, dx: mx, dz: mz };
-    }
-    look.current.lerp(new THREE.Vector3(p.x, 0, p.z), 1 - Math.exp(-dt * 5));
+    // Ease the velocity toward what is wanted: quick to start, a touch softer to stop.
+    const rate = want.lengthSq() > 0 ? 14 : 18;
+    vel.current.lerp(want, 1 - Math.exp(-dt * rate));
+    if (vel.current.lengthSq() < 0.0004) vel.current.set(0, 0);
+
+    if (vel.current.lengthSq() > 0) {
+      const [nx, nz] = collide(p.x + vel.current.x * dt, p.z + vel.current.y * dt);
+      // Bleed off the part of the velocity a wall absorbed, so the walker slides along it.
+      if (dt > 0) vel.current.set((nx - p.x) / dt, (nz - p.z) / dt);
+      p.x = nx;
+      p.z = nz;
+      p.ry = Math.atan2(vel.current.x, vel.current.y);
+      pos.current = { x: p.x, z: p.z, dx: vel.current.x, dz: vel.current.y };
+    } else pos.current = { ...pos.current, x: p.x, z: p.z };
+
+    // Camera: critically damped follow with a little look-ahead in the walking direction.
+    const ahead = new THREE.Vector3(p.x + vel.current.x * 0.25, 0, p.z + vel.current.y * 0.25);
+    look.current.lerp(ahead, 1 - Math.exp(-dt * 4));
     camera.position.copy(look.current).add(CAM_OFFSET);
     camera.lookAt(look.current);
+    const cam = camera as THREE.OrthographicCamera;
+    if (Math.abs(cam.zoom - zoom.current) > 0.01) {
+      cam.zoom += (zoom.current - cam.zoom) * (1 - Math.exp(-dt * 10));
+      cam.updateProjectionMatrix();
+    }
     tracker.tick(camera, look.current);
   });
 
-  return <Character avatar={avatar} pos={pos} moving={moving} />;
+  return <Character avatar={avatar} pos={pos} />;
 }
 
 // ---------- Root ----------

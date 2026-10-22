@@ -83,7 +83,7 @@ function rectAt(cx: number, cz: number, h: number): Rect {
   return rect(cx, cz, h);
 }
 
-const solids: Rect[] = [
+export const solids: Rect[] = [
   ...props.filter((p) => p.solid).map((p) => p.solid!),
   // Billboard posts.
   ...slots.map((s) => rect(s.x, s.z, 1.2)),
