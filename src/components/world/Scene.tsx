@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, useCursor, useTexture } from "@react-three/drei";
 import * as THREE from "three";
@@ -29,6 +29,9 @@ export type Avatar = (typeof AVATARS)[number];
 
 const sizes = manifest as Record<string, { w: number; h: number }>;
 const url = (name: string) => `/city/${name}.webp`;
+// Load every sprite up front: a texture that suspends mid-game (a walker turning
+// around) would otherwise blank the scene while it loads.
+if (typeof window !== "undefined") useTexture.preload(Object.keys(sizes).map(url));
 
 // ---------- Standee: a cut-out sprite standing upright, turned to the camera ----------
 
@@ -39,7 +42,15 @@ type StandeeProps = { name: string; width: number; flip?: boolean; position?: [n
  * plane is stretched by 1/cos(pitch) to show the art at its drawn proportions. alphaToCoverage
  * writes depth only where the art is, which gives correct overlap between sprites and 3D objects.
  */
-const Standee = forwardRef<THREE.Group, StandeeProps>(function Standee({ name, width, flip = false, position }, ref) {
+const Standee = forwardRef<THREE.Group, StandeeProps>(function Standee(props, ref) {
+  return (
+    <Suspense fallback={null}>
+      <StandeeArt {...props} ref={ref} />
+    </Suspense>
+  );
+});
+
+const StandeeArt = forwardRef<THREE.Group, StandeeProps>(function StandeeArt({ name, width, flip = false, position }, ref) {
   const tex = useTexture(url(name));
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
