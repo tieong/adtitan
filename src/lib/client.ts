@@ -8,11 +8,17 @@ const COLORS = ["#7cf7ff", "#ff6bd6", "#ffd166", "#8cff7a", "#b69cff", "#ff8a5c"
 
 export type Me = { id: string; name: string; color: string; avatar?: string };
 
+// crypto.randomUUID only exists in secure contexts, and the site may be served over plain HTTP.
+function newId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function me(): Me {
   const raw = localStorage.getItem("adcity:me");
   if (raw) return JSON.parse(raw) as Me;
   const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-  const m = { id: crypto.randomUUID(), name: `${pick(ADJ)} ${pick(NOUN)}`, color: pick(COLORS) };
+  const m = { id: newId(), name: `${pick(ADJ)} ${pick(NOUN)}`, color: pick(COLORS) };
   localStorage.setItem("adcity:me", JSON.stringify(m));
   return m;
 }
