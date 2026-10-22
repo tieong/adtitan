@@ -1,20 +1,5 @@
-@import "tailwindcss";
-
-@theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-:root {
-  color-scheme: dark;
-}
-
+/* Lime (src/components/lime/styles.css) owns the theme, reset and utilities. */
+html,
 body {
-  background: #05060a;
-  color: #f4f5f8;
-}
-
-::selection {
-  background: #7cf7ff;
-  color: #05060a;
+  margin: 0;
 }

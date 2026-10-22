@@ -1,22 +1,57 @@
-import Link from "next/link";
+"use client";
 
-export function Nav() {
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { buttonVariants } from "@/components/lime/ui/button";
+import { cn } from "@/lib/lime/utils";
+
+const LINKS = [
+  { href: "/watch", label: "Watch" },
+  { href: "/dashboard", label: "Analytics" },
+  { href: "/world", label: "City" },
+];
+
+/**
+ * Sticky header; gains its bottom edge once content scrolls under it.
+ * primaryCreate: the page has no main action of its own, so "Make an ad" carries the glow.
+ */
+export function Nav({ showCreate = true, primaryCreate = false }: { showCreate?: boolean; primaryCreate?: boolean }) {
+  const path = usePathname();
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const on = () => setScrolled(window.scrollY > 4);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, []);
+
   return (
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-[#05060a]/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-5">
-        <Link href="/" className="text-[15px] font-semibold tracking-tight">
-          Ad<span className="text-[#7cf7ff]">City</span>
+    <header className={cn("sticky top-0 z-10 bg-page", scrolled && "border-b border-line")}>
+      <div className="mx-auto flex h-14 w-full max-w-5xl items-center gap-1 px-4 sm:px-6">
+        <Link href="/" className="me-3 text-base font-semibold tracking-tight">
+          AdCity
         </Link>
-        <nav className="flex gap-5 text-sm text-white/55">
-          <Link href="/" className="hover:text-white">Generate</Link>
-          <Link href="/dashboard" className="hover:text-white">Analytics</Link>
+        <nav aria-label="Main" className="flex items-center gap-1">
+          {LINKS.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              aria-current={path === l.href ? "page" : undefined}
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                path === l.href ? "text-fg" : "text-fg-2",
+              )}
+            >
+              {l.label}
+            </Link>
+          ))}
         </nav>
-        <Link
-          href="/world"
-          className="ml-auto rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition hover:bg-[#7cf7ff]"
-        >
-          Enter the city →
-        </Link>
+        {showCreate && path !== "/" && (
+          <Link href="/" className={cn(buttonVariants({ variant: primaryCreate ? "primary" : "secondary", size: "sm" }), "ms-auto")}>
+            Make an ad
+          </Link>
+        )}
       </div>
     </header>
   );

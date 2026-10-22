@@ -1,4 +1,6 @@
 allowBuilds:
+  '@carbon/icon-helpers': false
+  '@carbon/icons-react': false
   esbuild: true
   puppeteer: false
   sharp: false

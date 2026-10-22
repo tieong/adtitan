@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 const World = dynamic(() => import("@/components/world/World"), {
   ssr: false,
   loading: () => (
-    <div className="fixed inset-0 grid place-items-center bg-[#04050a] font-mono text-sm text-white/50">
+    <div data-theme="dark" className="lime fixed inset-0 grid place-items-center bg-page text-sm text-fg-2">
       Building the city…
     </div>
   ),

@@ -6,6 +6,10 @@ import Link from "next/link";
 import type { Campaign, Player } from "@/lib/types";
 import { me as getMe, visitUrl, type Me } from "@/lib/client";
 import { AdCard } from "@/components/AdCard";
+import { Avatar } from "@/components/lime/ui/avatar";
+import { Button, buttonVariants } from "@/components/lime/ui/button";
+import { List, ListItem } from "@/components/lime/ui/list";
+import { imageUrl } from "@/lib/format";
 import { LIMIT, slots, viewpoint } from "./city";
 import { Scene, type Pose } from "./Scene";
 import { Tracker } from "./tracker";
@@ -93,7 +97,7 @@ export default function World({ focusId }: { focusId: string | null }) {
   );
 
   return (
-    <div className="fixed inset-0 bg-[#04050a] text-white">
+    <div data-theme="dark" className="lime fixed inset-0 bg-page text-fg">
       {me && tracker && (
         <Canvas camera={{ fov: 60, near: 0.5, far: 400, position: [0, 6, 33] }} dpr={[1, 1.75]} gl={{ antialias: true }}>
           <Suspense fallback={null}>
@@ -111,101 +115,74 @@ export default function World({ focusId }: { focusId: string | null }) {
         </Canvas>
       )}
 
-      {/* Top bar */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-4">
-        <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/10 bg-black/60 px-4 py-2.5 backdrop-blur-md">
-          <Link href="/" className="font-semibold tracking-tight">
-            Ad<span className="text-[#7cf7ff]">City</span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+        <div className="pointer-events-auto flex h-(--control-md) items-center gap-4 rounded-control bg-surface px-4 shadow-menu">
+          <Link href="/" className="text-sm font-semibold">
+            AdCity
           </Link>
-          <span className="h-4 w-px bg-white/15" />
-          <span className="flex items-center gap-1.5 font-mono text-xs text-white/70">
-            <span className="size-1.5 animate-pulse rounded-full bg-[#8cff7a]" />
-            {players.length + 1} online
+          <span className="text-sm text-fg-2">
+            {players.length + 1} here, {campaigns.length} billboards, {seen} seen by you
           </span>
-          <span className="font-mono text-xs text-white/50">{campaigns.length} billboards</span>
-          <span className="font-mono text-xs text-white/50">{seen} ads seen</span>
         </div>
         <div className="pointer-events-auto flex gap-2">
-          <Link
-            href="/dashboard"
-            className="rounded-xl border border-white/10 bg-black/60 px-3.5 py-2 text-sm text-white/80 backdrop-blur-md hover:text-white"
-          >
+          <Link href="/dashboard" className={buttonVariants({ variant: "secondary" })}>
             Analytics
           </Link>
-          <Link href="/" className="rounded-xl bg-[#7cf7ff] px-3.5 py-2 text-sm font-semibold text-black hover:bg-white">
-            + Put your project here
+          <Link href="/" className={buttonVariants()}>
+            Put your project here
           </Link>
         </div>
       </div>
 
-      {/* Directory */}
-      <div className="absolute bottom-4 left-4 top-20 hidden w-72 flex-col md:flex">
-        <button
-          onClick={() => setListOpen((o) => !o)}
-          className="mb-2 self-start rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider text-white/60 backdrop-blur-md"
-        >
-          {listOpen ? "Hide" : "Show"} projects
-        </button>
+      <div className="absolute start-4 top-20 bottom-4 hidden w-72 flex-col gap-2 md:flex">
+        <Button variant="secondary" size="sm" className="self-start" onClick={() => setListOpen((o) => !o)}>
+          {listOpen ? "Hide projects" : "Show projects"}
+        </Button>
         {listOpen && (
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-black/55 p-2 backdrop-blur-md">
-            {campaigns.length === 0 && <p className="p-3 text-sm text-white/50">No billboards yet. Be the first.</p>}
-            {campaigns.map((c, i) => (
-              <button
-                key={c.id}
-                onClick={() => goTo(c.id)}
-                className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left hover:bg-white/5"
-              >
-                <span
-                  className="grid size-9 shrink-0 place-items-center rounded-lg text-lg"
-                  style={{ background: c.palette.bg, boxShadow: `inset 0 0 0 1px ${c.palette.accent}55` }}
-                >
-                  {c.emoji}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{c.name}</span>
-                  <span className="block truncate text-xs text-white/45">{c.variants[0]?.headline}</span>
-                </span>
-                <span className="ml-auto font-mono text-[10px] text-white/30">#{i + 1}</span>
-              </button>
-            ))}
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-panel bg-surface shadow-menu">
+            {campaigns.length === 0 ? (
+              <p className="p-4 text-sm text-fg-2">No billboards yet. Be the first.</p>
+            ) : (
+              <List>
+                {campaigns.map((c) => (
+                  <ListItem
+                    key={c.id}
+                    onClick={() => goTo(c.id)}
+                    leading={<Avatar size="sm" name={c.name} src={imageUrl(c) ?? undefined} />}
+                    title={c.name}
+                    description={c.variants[0]?.headline}
+                  />
+                ))}
+              </List>
+            )}
           </div>
         )}
       </div>
 
       <Minimap campaigns={campaigns} pose={pose} players={players} />
 
-      {/* Selected ad */}
       {selected && (
-        <div className="absolute bottom-4 left-1/2 w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 rounded-3xl border border-white/10 bg-black/75 p-3 backdrop-blur-xl">
+        <div className="absolute bottom-4 left-1/2 flex w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-3 rounded-sheet bg-surface p-3 shadow-overlay">
           <AdCard campaign={selected.c} variant={selected.v} />
-          <div className="flex items-center gap-2 p-2 pt-3">
-            <p className="mr-auto line-clamp-2 text-sm text-white/65">{selected.c.description}</p>
-            <button onClick={() => setSelected(null)} className="rounded-xl px-3 py-2 text-sm text-white/60 hover:text-white">
+          <p className="px-1 text-sm text-fg-2">{selected.c.description}</p>
+          <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
               Close
-            </button>
-            <Link
-              href={`/c/${selected.c.id}`}
-              className="rounded-xl border border-white/15 px-3 py-2 text-sm text-white/85 hover:bg-white/5"
-            >
-              Stats
+            </Button>
+            <Link href={`/c/${selected.c.id}`} className={buttonVariants({ variant: "secondary", size: "sm", className: "ms-auto" })}>
+              See its stats
             </Link>
-            <a
-              href={visitUrl(selected.c, selected.v, "world")}
-              target="_blank"
-              rel="noopener"
-              className="whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold text-black"
-              style={{ background: selected.c.palette.accent }}
-            >
-              {selected.c.variants[selected.v]?.cta ?? "Visit"} ↗
+            <a href={visitUrl(selected.c, selected.v, "world")} target="_blank" rel="noopener" className={buttonVariants({ size: "sm" })}>
+              Open {selected.c.name}
             </a>
           </div>
         </div>
       )}
 
       {!selected && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-4 py-2 font-mono text-[11px] text-white/60 backdrop-blur-md">
-          WASD / arrows to walk · drag to look · click the ground to move · click a billboard
-        </div>
+        <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-control bg-surface px-4 py-2 text-sm text-fg-2 shadow-menu max-md:hidden">
+          Walk with WASD or the arrows, drag to look, click a billboard to open it
+        </p>
       )}
     </div>
   );
@@ -232,7 +209,7 @@ function Minimap({ campaigns, pose, players }: { campaigns: Campaign[]; pose: Re
     top: `${((z + LIMIT) / (2 * LIMIT)) * 100}%`,
   });
   return (
-    <div className="absolute right-4 top-20 hidden size-44 overflow-hidden rounded-2xl border border-white/10 bg-black/60 backdrop-blur-md md:block">
+    <div aria-hidden="true" className="absolute end-4 top-20 hidden size-44 overflow-hidden rounded-panel bg-surface shadow-menu md:block">
       {slots.slice(0, campaigns.length).map((s, i) => (
         <span
           key={s.index}
@@ -241,14 +218,12 @@ function Minimap({ campaigns, pose, players }: { campaigns: Campaign[]; pose: Re
         />
       ))}
       {players.map((p) => (
-        <span
-          key={p.id}
-          className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{ ...pos(p.x, p.z), background: p.color }}
-        />
+        <span key={p.id} className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ ...pos(p.x, p.z), background: p.color }} />
       ))}
       <div ref={dot} className="absolute">
-        <div className="h-0 w-0 border-x-[5px] border-b-[10px] border-x-transparent border-b-white" style={{ transform: "rotate(180deg)" }} />
+        <svg width="12" height="12" viewBox="0 0 12 12" className="text-fg">
+          <path d="M6 12 L0 0 L12 0 Z" fill="currentColor" />
+        </svg>
       </div>
     </div>
   );

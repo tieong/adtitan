@@ -202,9 +202,11 @@ export async function latestVideos(): Promise<Map<string, VideoJob>> {
     for (const j of mem().jobs.values()) if (j.status === "done" && j.hasVideo) out.set(j.campaignId, j);
     return out;
   }
+  // Prefer the newest vertical take, which is what the feed shows.
   const { rows } = await p.query<Row>(
     `select distinct on (campaign_id) ${COLS} from video_jobs
-     where status = 'done' and video is not null order by campaign_id, created_at desc`,
+     where status = 'done' and video is not null
+     order by campaign_id, (format = 'vertical') desc, created_at desc`,
   );
   for (const r of rows) out.set(r.campaign_id, fromRow(r));
   return out;
@@ -215,4 +217,14 @@ export async function getVideo(id: string): Promise<Buffer | null> {
   if (!p) return mem().files.get(id) ?? null;
   const { rows } = await p.query<{ video: Buffer | null }>(`select video from video_jobs where id = $1`, [id]);
   return rows[0]?.video ?? null;
+}
+
+/** Jobs that never finished, e.g. because the server restarted mid-render. */
+export async function unfinishedJobs(): Promise<VideoJob[]> {
+  const p = await ready();
+  if (!p) return [];
+  const { rows } = await p.query<Row>(
+    `select ${COLS} from video_jobs where status not in ('done', 'failed') order by created_at asc`,
+  );
+  return rows.map(fromRow);
 }

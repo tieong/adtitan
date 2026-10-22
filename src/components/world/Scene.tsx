@@ -300,8 +300,8 @@ function Avatar({ color, name, isMe }: { color: string; name: string; isMe?: boo
       </mesh>
       {!isMe && (
         <Html position={[0, 2.6, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-full border border-white/15 bg-black/70 px-2.5 py-1 font-mono text-[11px] text-white backdrop-blur">
-            <span className="mr-1.5 inline-block size-1.5 rounded-full" style={{ background: color }} />
+          <div className="pointer-events-none flex items-center gap-1.5 rounded-control bg-surface px-2.5 py-1 text-xs whitespace-nowrap text-fg shadow-menu">
+            <span className="inline-block size-1.5 rounded-full" style={{ background: color }} />
             {name}
           </div>
         </Html>

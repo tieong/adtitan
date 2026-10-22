@@ -1,19 +1,23 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import "@/components/lime/styles.css";
 import "./globals.css";
-
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+import { LimePortalProvider } from "@/lib/lime/portal";
+import { ToastProvider } from "@/components/lime/ui/toast";
 
 export const metadata: Metadata = {
-  title: "AdCity — your hackathon project, on a billboard",
-  description: "Paste a GitHub repo or a website. AI writes the campaign. It goes live in a 3D city of billboards.",
+  title: "AdCity: turn your project into a video ad",
+  description:
+    "Paste a GitHub repo or a website. AdCity writes the ad, records the voiceover, scores it and renders a video other hackers watch.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full font-sans">{children}</body>
+    <html lang="en">
+      <body className="lime">
+        <LimePortalProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </LimePortalProvider>
+      </body>
     </html>
   );
 }

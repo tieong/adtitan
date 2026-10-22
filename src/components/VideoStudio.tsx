@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Campaign } from "@/lib/types";
+import { Button, buttonVariants } from "@/components/lime/ui/button";
+import { Segmented, SegmentedItem } from "@/components/lime/ui/segmented";
+import { List, ListItem } from "@/components/lime/ui/list";
+import { Status } from "@/components/lime/ui/status";
+import { Progress } from "@/components/lime/ui/progress";
+import { ErrorState } from "@/components/lime/ui/error-state";
+import { Skeleton } from "@/components/lime/ui/skeleton";
+import { Download, Icon } from "@/components/lime/icon";
 
 type Format = "vertical" | "landscape";
 type Job = {
@@ -17,11 +25,20 @@ type Job = {
 };
 
 const STEPS: { key: Job["status"]; label: string; by: string }[] = [
-  { key: "script", label: "Script", by: "OpenAI" },
-  { key: "audio", label: "Voice, music & SFX", by: "ElevenLabs" },
-  { key: "compose", label: "Motion design", by: "HyperFrames" },
-  { key: "render", label: "Render MP4", by: "HyperFrames" },
+  { key: "script", label: "Writing the script", by: "OpenAI" },
+  { key: "audio", label: "Recording the voice, music and sound", by: "ElevenLabs" },
+  { key: "compose", label: "Laying out the motion design", by: "HyperFrames" },
+  { key: "render", label: "Rendering the video", by: "HyperFrames" },
 ];
+
+const VOICE_NAMES: Record<string, string> = {
+  liam: "Liam",
+  charlie: "Charlie",
+  brian: "Brian",
+  laura: "Laura",
+  jessica: "Jessica",
+  daniel: "Daniel",
+};
 
 export function VideoStudio({ campaign, autoStart = false }: { campaign: Campaign; autoStart?: boolean }) {
   const [jobs, setJobs] = useState<Job[] | null>(null);
@@ -55,7 +72,7 @@ export function VideoStudio({ campaign, autoStart = false }: { campaign: Campaig
     load();
   }, [load]);
 
-  // Kick off the first video automatically right after an ad is generated.
+  // A brand new campaign gets its first video without another click.
   const [autoDone, setAutoDone] = useState(false);
   useEffect(() => {
     if (!autoStart || autoDone || jobs === null) return;
@@ -70,123 +87,106 @@ export function VideoStudio({ campaign, autoStart = false }: { campaign: Campaig
     return () => clearInterval(id);
   }, [active, load]);
 
-  const latest = jobs?.find((j) => j.format === format && j.status === "done" && j.hasVideo) ?? jobs?.find((j) => j.status === "done" && j.hasVideo);
+  const done = jobs?.filter((j) => j.status === "done" && j.hasVideo) ?? [];
+  const latest = done.find((j) => j.format === format) ?? done[0];
   const lastFailed = jobs?.[0]?.status === "failed" ? jobs[0] : null;
-  const shown = active ?? latest;
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-4 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div>
-          <div className="font-mono text-[11px] uppercase tracking-wider text-white/40">Video ad</div>
-          <div className="text-sm text-white/70">Voiceover, music and motion design, rendered to MP4.</div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex rounded-xl border border-white/10 p-1">
-            {(["vertical", "landscape"] as Format[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFormat(f)}
-                className={`rounded-lg px-3 py-1.5 font-mono text-xs ${format === f ? "bg-white text-black" : "text-white/55 hover:text-white"}`}
-              >
-                {f === "vertical" ? "9:16" : "16:9"}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => start(format)}
-            disabled={!!active || starting}
-            className="rounded-xl bg-[#7cf7ff] px-4 py-2 text-sm font-semibold text-black hover:bg-white disabled:opacity-40"
-          >
-            {active ? "Rendering…" : latest ? "New take" : "Generate video"}
-          </button>
-        </div>
+    <section className="flex flex-col gap-4" aria-labelledby="video-heading">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 id="video-heading" className="me-auto text-lg font-semibold">
+          Video ad
+        </h2>
+        <Segmented size="sm" value={format} onValueChange={(v) => setFormat(v as Format)} aria-label="Video format">
+          <SegmentedItem value="vertical">Vertical</SegmentedItem>
+          <SegmentedItem value="landscape">Landscape</SegmentedItem>
+        </Segmented>
+        <Button
+          variant={latest ? "secondary" : "primary"}
+          size="sm"
+          pending={starting || !!active}
+          onClick={() => start(format)}
+        >
+          {latest ? "Make another take" : "Make the video"}
+        </Button>
       </div>
 
-      {active && <Progress job={active} />}
+      {jobs === null && <Skeleton shape="block" className="h-64 w-full rounded-panel" />}
+
+      {active && <Rendering job={active} />}
 
       {!active && lastFailed && (
-        <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          Last render failed: {lastFailed.error}
-        </p>
+        <ErrorState
+          title="The last render failed"
+          description={lastFailed.error ?? undefined}
+          onRetry={() => start(lastFailed.format)}
+          retrying={starting}
+        />
       )}
 
       {!active && latest && (
-        <div className={`grid gap-5 ${latest.format === "vertical" ? "md:grid-cols-[minmax(0,320px)_1fr]" : ""}`}>
+        <div className={`grid gap-6 ${latest.format === "vertical" ? "md:grid-cols-[minmax(0,300px)_1fr]" : ""}`}>
           <video
             key={latest.id}
-            src={`/api/videos/${latest.id}/file`}
+            // #t=2.5 shows the first headline as the still frame instead of the intro.
+            src={`/api/videos/${latest.id}/file#t=2.5`}
             controls
-            autoPlay
             playsInline
-            className={`w-full rounded-2xl bg-black ring-1 ring-white/10 ${latest.format === "vertical" ? "aspect-[9/16]" : "aspect-video"}`}
+            preload="auto"
+            className={`w-full rounded-panel bg-surface-2 ${latest.format === "vertical" ? "aspect-[9/16]" : "aspect-video"}`}
           />
-          <div className="min-w-0">
+          <div className="flex min-w-0 flex-col gap-4">
             {latest.script && (
-              <ol className="space-y-2.5">
+              <List>
                 {latest.script.scenes.map((s, i) => (
-                  <li key={i} className="rounded-xl border border-white/5 bg-black/20 px-3.5 py-2.5">
-                    <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-white/35">
-                      <span>{String(i + 1).padStart(2, "0")}</span>
-                      <span>{s.kind}</span>
-                    </div>
-                    <div className="mt-0.5 text-sm font-semibold">{s.title}</div>
-                    <div className="text-sm text-white/55">“{s.voiceover.replace(/\[[^\]]*\]\s*/g, "")}”</div>
-                  </li>
+                  <ListItem key={i} title={s.title} description={`“${s.voiceover.replace(/\[[^\]]*\]\s*/g, "")}”`} />
                 ))}
-              </ol>
+              </List>
             )}
-            <div className="mt-4 flex flex-wrap items-center gap-3 font-mono text-[11px] text-white/40">
-              <span>{latest.duration?.toFixed(1)}s</span>
-              <span>voice: {latest.script?.voice}</span>
-              <span>{latest.message}</span>
-              <a href={`/api/videos/${latest.id}/file?download`} className="ml-auto rounded-lg border border-white/15 px-3 py-1.5 text-white/80 hover:bg-white/5">
-                Download MP4
-              </a>
-            </div>
+            <p className="text-sm text-fg-2">
+              {latest.duration?.toFixed(1)} seconds, read by {VOICE_NAMES[latest.script?.voice ?? ""] ?? "an ElevenLabs voice"}.{" "}
+              {latest.message}.
+            </p>
+            <a href={`/api/videos/${latest.id}/file?download`} className={buttonVariants({ className: "self-start" })}>
+              <Icon icon={Download} size={16} />
+              Download the MP4
+            </a>
           </div>
         </div>
       )}
 
-      {!shown && !lastFailed && jobs !== null && (
-        <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">
-          No video yet. One click turns this campaign into a 20-second ad.
-        </div>
+      {jobs !== null && !active && !latest && !lastFailed && (
+        <p className="text-sm text-fg-2">No video yet. Making one takes about a minute and uses the ads above as its brief.</p>
       )}
-    </div>
+    </section>
   );
 }
 
-function Progress({ job }: { job: Job }) {
+function Rendering({ job }: { job: Job }) {
+  // -1 while the job waits for a free slot: every step still shows as next.
   const idx = STEPS.findIndex((s) => s.key === job.status);
   return (
-    <div className="mb-2">
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-[#7cf7ff] transition-[width] duration-700" style={{ width: `${Math.max(3, job.progress)}%` }} />
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div className="flex flex-col gap-4 rounded-panel bg-surface p-5">
+      <Progress value={job.progress} label="Video progress" valueText={`${Math.round(job.progress)}%, ${job.message}`} />
+      {(job.status === "queued" || job.message.startsWith("Waiting")) && <p className="text-sm text-fg">{job.message}</p>}
+      <List>
         {STEPS.map((s, i) => (
-          <div
+          <ListItem
             key={s.key}
-            className={`rounded-xl border px-3 py-2.5 ${i < idx ? "border-[#8cff7a]/30 bg-[#8cff7a]/5" : i === idx ? "border-[#7cf7ff]/40 bg-[#7cf7ff]/5" : "border-white/5"}`}
-          >
-            <div className="flex items-center gap-2 text-sm">
-              {i < idx ? (
-                <span className="text-[#8cff7a]">✓</span>
+            title={s.label}
+            description={s.by}
+            trailing={
+              i < idx ? (
+                <Status status="done" label="Done" />
               ) : i === idx ? (
-                <span className="size-1.5 animate-pulse rounded-full bg-[#7cf7ff]" />
+                <Status status="running" label={i === 3 ? `${Math.round(job.progress)}%` : "Working"} />
               ) : (
-                <span className="size-1.5 rounded-full bg-white/20" />
-              )}
-              <span className={i <= idx ? "text-white" : "text-white/35"}>{s.label}</span>
-            </div>
-            <div className="mt-0.5 font-mono text-[10px] text-white/35">{s.by}</div>
-          </div>
+                <Status status="queued" label="Next" />
+              )
+            }
+          />
         ))}
-      </div>
-      <div className="mt-3 font-mono text-[11px] text-white/45">
-        {job.message} · {Math.round(job.progress)}%
-      </div>
+      </List>
     </div>
   );
 }
