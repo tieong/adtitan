@@ -14,6 +14,7 @@
     "@base-ui/react": "^1.9.0",
     "@carbon/icons-react": "^11.91.0",
     "@clickhouse/client": "^1.24.1",
+    "@clickhouse/client-web": "^1.24.0",
     "@elevenlabs/elevenlabs-js": "^2.74.0",
     "@hyperframes/producer": "^0.8.183",
     "@number-flow/react": "^0.6.2",

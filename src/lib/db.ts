@@ -1,32 +1,20 @@
 import "server-only";
-import { Pool } from "pg";
+import { onWorkers, pg, type Pg } from "./runtime";
 import type { Campaign } from "./types";
 
 // Campaigns live in Aiven PostgreSQL. Without DATABASE_URL we fall back to an
 // in-process store so the demo still runs on a laptop with no network.
 
 const g = globalThis as unknown as {
-  __pg?: Pool;
   __pgReady?: Promise<void>;
   __mem?: { campaigns: Map<string, Campaign>; images: Map<string, { data: Buffer; mime: string }> };
 };
 
-function sslConfig() {
-  const ca = process.env.AIVEN_CA_CERT?.replace(/\\n/g, "\n");
-  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
-}
-
-function pool(): Pool | null {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
-  if (!g.__pg) {
-    // pg's URL parser would override our ssl object with sslmode=require, so strip it.
-    const u = new URL(url);
-    u.searchParams.delete("sslmode");
-    g.__pg = new Pool({ connectionString: u.toString(), ssl: sslConfig(), max: 5 });
-  }
+function pool(): Pg | null {
+  const p = pg();
+  if (!p || onWorkers) return p;
   if (!g.__pgReady) {
-    g.__pgReady = g.__pg
+    g.__pgReady = p
       .query(
         `create table if not exists campaigns (
           id text primary key,
@@ -53,7 +41,7 @@ function pool(): Pool | null {
         throw e;
       });
   }
-  return g.__pg;
+  return p;
 }
 
 async function ready() {

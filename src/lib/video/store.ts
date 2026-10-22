@@ -1,5 +1,5 @@
 import "server-only";
-import { Pool } from "pg";
+import { onWorkers, pg, type Pg } from "../runtime";
 import type { Format } from "./compose";
 
 // Video jobs and rendered MP4s live next to campaigns in Aiven PostgreSQL.
@@ -23,21 +23,14 @@ export type VideoJob = {
 };
 
 const g = globalThis as unknown as {
-  __vpg?: Pool;
   __vReady?: Promise<void>;
   __vmem?: { jobs: Map<string, VideoJob>; files: Map<string, Buffer> };
 };
 
-function pool(): Pool | null {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
-  if (!g.__vpg) {
-    const u = new URL(url);
-    u.searchParams.delete("sslmode");
-    const ca = process.env.AIVEN_CA_CERT?.replace(/\\n/g, "\n");
-    g.__vpg = new Pool({ connectionString: u.toString(), ssl: ca ? { ca } : { rejectUnauthorized: false }, max: 3 });
-  }
-  g.__vReady ??= g.__vpg
+function pool(): Pg | null {
+  const p = pg();
+  if (!p || onWorkers) return p;
+  g.__vReady ??= p
     .query(
       `create table if not exists video_jobs (
         id text primary key,
@@ -60,7 +53,7 @@ function pool(): Pool | null {
       g.__vReady = undefined;
       throw e;
     });
-  return g.__vpg;
+  return p;
 }
 
 async function ready() {

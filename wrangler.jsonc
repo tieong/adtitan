@@ -14,6 +14,12 @@
 			"service": "adtitan"
 		}
 	],
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "27e122bde85146338869cb0f1d5ca90c"
+		}
+	],
 	"images": {
 		"binding": "IMAGES"
 	},

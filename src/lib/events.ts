@@ -1,5 +1,7 @@
 import "server-only";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
+import { createClient as createWebClient } from "@clickhouse/client-web";
+import { onWorkers } from "./runtime";
 import type { CampaignStats, TrackEvent, VariantStats } from "./types";
 
 // Ad events (impressions, clicks, visits) go to Aiven ClickHouse. Without
@@ -16,15 +18,16 @@ const g = globalThis as unknown as {
 function client(): ClickHouseClient | null {
   const url = process.env.CLICKHOUSE_URL;
   if (!url) return null;
-  if (!g.__ch) {
-    g.__ch = createClient({
-      url,
-      username: process.env.CLICKHOUSE_USER ?? "avnadmin",
-      password: process.env.CLICKHOUSE_PASSWORD ?? "",
-      database: "default",
-      request_timeout: 15_000,
-    });
-  }
+  const opts = {
+    url,
+    username: process.env.CLICKHOUSE_USER ?? "avnadmin",
+    password: process.env.CLICKHOUSE_PASSWORD ?? "",
+    database: "default",
+    request_timeout: 15_000,
+  };
+  // The Node client keeps sockets alive across requests, which Workers forbids; the fetch one does not.
+  if (onWorkers) return createWebClient(opts) as unknown as ClickHouseClient;
+  g.__ch ??= createClient(opts);
   if (!g.__chReady) {
     g.__chReady = g.__ch
       .command({
