@@ -2,12 +2,12 @@ import * as THREE from "three";
 import type { TrackEvent } from "@/lib/types";
 import type { Slot } from "./city";
 
-// An impression = a billboard was on screen, facing the viewer, within reading
-// distance, for at least DWELL_MS. Each (campaign, variant) counts at most once
-// per COOLDOWN_MS per session.
+// An impression = a billboard was on screen, within reading distance of the player,
+// for at least DWELL_MS. Each (campaign, variant) counts at most once per
+// COOLDOWN_MS per session.
 const DWELL_MS = 1000;
 const COOLDOWN_MS = 30_000;
-const MAX_DIST = 55;
+const MAX_DIST = 30;
 
 type Entry = { campaignId: string; slot: Slot; variant: () => number; seenFor: number };
 
@@ -32,7 +32,8 @@ export class Tracker {
     return () => void this.entries.delete(e);
   }
 
-  tick(camera: THREE.Camera) {
+  /** focus: the point the camera follows (the player); distance is measured from there. */
+  tick(camera: THREE.Camera, focus: THREE.Vector3) {
     const now = performance.now();
     const dt = now - this.lastTick;
     if (dt < 250) return;
@@ -40,13 +41,9 @@ export class Tracker {
     this.m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.m);
     for (const e of this.entries) {
-      this.v.set(e.slot.x, 10, e.slot.z);
-      const dx = camera.position.x - e.slot.x;
-      const dz = camera.position.z - e.slot.z;
-      const dist = Math.hypot(dx, dz);
-      // Facing: the viewer must be in front of the board, not behind it.
-      const facing = (Math.sin(e.slot.ry) * dx + Math.cos(e.slot.ry) * dz) / (dist || 1);
-      const visible = dist < MAX_DIST && facing > 0.25 && this.frustum.containsPoint(this.v);
+      this.v.set(e.slot.x, 5, e.slot.z);
+      const dist = Math.hypot(focus.x - e.slot.x, focus.z - e.slot.z);
+      const visible = dist < MAX_DIST && this.frustum.containsPoint(this.v);
       e.seenFor = visible ? e.seenFor + Math.min(dt, 500) : 0;
       if (e.seenFor < DWELL_MS) continue;
       const variant = e.variant();

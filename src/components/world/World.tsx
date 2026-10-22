@@ -4,17 +4,20 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas } from "@react-three/fiber";
 import Link from "next/link";
 import type { Campaign, Player } from "@/lib/types";
-import { me as getMe, visitUrl, type Me } from "@/lib/client";
+import { me as getMe, saveMe, visitUrl, type Me } from "@/lib/client";
 import { AdCard } from "@/components/AdCard";
 import { Avatar } from "@/components/lime/ui/avatar";
 import { Button, buttonVariants } from "@/components/lime/ui/button";
 import { List, ListItem } from "@/components/lime/ui/list";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/lime/ui/dialog";
+import { Field, FieldLabel } from "@/components/lime/ui/field";
+import { Input } from "@/components/lime/ui/input";
 import { imageUrl } from "@/lib/format";
 import { LIMIT, slots, viewpoint } from "./city";
-import { Scene, type Pose } from "./Scene";
+import { AVATARS, CAM_OFFSET, Scene, type Pose } from "./Scene";
 import { Tracker } from "./tracker";
 
-const SPAWN: Pose = { x: 0, z: 20, ry: Math.PI };
+const SPAWN: Pose = { x: 9, z: 11, ry: 0 };
 
 export default function World({ focusId }: { focusId: string | null }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -27,7 +30,16 @@ export default function World({ focusId }: { focusId: string | null }) {
   const pose = useRef<Pose>({ ...SPAWN });
   const tracker = useMemo(() => (me ? new Tracker(me.id) : null), [me]);
 
-  useEffect(() => setMe(getMe()), []);
+  useEffect(() => {
+    const m = getMe();
+    // ?avatar=c3 skips the picker (handy for shared links and screenshots).
+    const pick = new URLSearchParams(location.search).get("avatar");
+    if (!m.avatar && pick && (AVATARS as readonly string[]).includes(pick)) {
+      m.avatar = pick;
+      saveMe(m);
+    }
+    setMe(m);
+  }, []);
   useEffect(() => {
     if (!tracker) return;
     tracker.onImpression = () => setSeen((n) => n + 1);
@@ -97,14 +109,20 @@ export default function World({ focusId }: { focusId: string | null }) {
   );
 
   return (
-    <div data-theme="dark" className="lime fixed inset-0 bg-page text-fg">
-      {me && tracker && (
-        <Canvas camera={{ fov: 60, near: 0.5, far: 400, position: [0, 6, 33] }} dpr={[1, 1.75]} gl={{ antialias: true }}>
+    // Daytime sky behind the transparent canvas.
+    <div className="fixed inset-0 bg-[linear-gradient(#bfe6ff,#e9f7ff)] text-fg">
+      {me?.avatar && tracker && (
+        <Canvas
+          orthographic
+          camera={{ zoom: 20, near: 1, far: 400, position: [SPAWN.x + CAM_OFFSET.x, CAM_OFFSET.y, SPAWN.z + CAM_OFFSET.z] }}
+          dpr={[1, 2]}
+          gl={{ antialias: true, alpha: true }}
+        >
           <Suspense fallback={null}>
             <Scene
               campaigns={campaigns}
               players={players}
-              color={me.color}
+              avatar={me.avatar}
               pose={pose}
               teleport={teleport}
               tracker={tracker}
@@ -184,6 +202,8 @@ export default function World({ focusId }: { focusId: string | null }) {
           Walk with WASD or the arrows, drag to look, click a billboard to open it
         </p>
       )}
+
+      <AvatarPicker me={me} onDone={(m) => setMe(m)} />
     </div>
   );
 }
@@ -226,5 +246,56 @@ function Minimap({ campaigns, pose, players }: { campaigns: Campaign[]; pose: Re
         </svg>
       </div>
     </div>
+  );
+}
+
+/** First visit: pick a character and a name. Stored locally with the session id. */
+function AvatarPicker({ me, onDone }: { me: Me | null; onDone: (m: Me) => void }) {
+  const open = !!me && !me.avatar;
+  const [avatar, setAvatar] = useState<string>(AVATARS[0]);
+  const [name, setName] = useState("");
+  useEffect(() => {
+    if (me) setName(me.name);
+  }, [me]);
+  if (!me) return null;
+  const done = () => {
+    const m = { ...me, avatar, name: name.trim().slice(0, 24) || me.name };
+    saveMe(m);
+    onDone(m);
+  };
+  return (
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent showClose={false}>
+        <DialogHeader>
+          <DialogTitle>Pick your character</DialogTitle>
+          <DialogDescription>Other people in the city see this character and your name above it.</DialogDescription>
+        </DialogHeader>
+        <div role="radiogroup" aria-label="Character" className="grid grid-cols-4 gap-2">
+          {AVATARS.map((a) => (
+            <button
+              key={a}
+              type="button"
+              role="radio"
+              aria-checked={avatar === a}
+              aria-label={`Character ${a.slice(1)}`}
+              onClick={() => setAvatar(a)}
+              className={`flex aspect-square items-end justify-center overflow-hidden rounded-field p-1 ${avatar === a ? "bg-accent-wash outline-2 outline-accent-line" : "bg-surface hover:bg-surface-2"}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/city/${a}-front.webp`} alt="" className="h-full w-auto object-contain" />
+            </button>
+          ))}
+        </div>
+        <Field name="name">
+          <FieldLabel>Your name</FieldLabel>
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} />
+        </Field>
+        <DialogFooter>
+          <Button size="lg" className="w-full sm:w-auto" onClick={done}>
+            Enter the city
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

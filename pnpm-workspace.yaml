@@ -5,3 +5,4 @@ allowBuilds:
   puppeteer: false
   sharp: false
   unrs-resolver: false
+  workerd: true

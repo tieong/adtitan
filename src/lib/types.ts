@@ -59,6 +59,7 @@ export type Player = {
   id: string;
   name: string;
   color: string;
+  avatar?: string;
   x: number;
   z: number;
   ry: number;

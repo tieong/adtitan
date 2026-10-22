@@ -6,7 +6,7 @@ const ADJ = ["Neon", "Swift", "Quiet", "Lucky", "Cosmic", "Pixel", "Turbo", "Lun
 const NOUN = ["Fox", "Hacker", "Otter", "Comet", "Panda", "Falcon", "Koala", "Robot", "Tiger", "Whale"];
 const COLORS = ["#7cf7ff", "#ff6bd6", "#ffd166", "#8cff7a", "#b69cff", "#ff8a5c"];
 
-export type Me = { id: string; name: string; color: string };
+export type Me = { id: string; name: string; color: string; avatar?: string };
 
 export function me(): Me {
   const raw = localStorage.getItem("adcity:me");
@@ -15,6 +15,10 @@ export function me(): Me {
   const m = { id: crypto.randomUUID(), name: `${pick(ADJ)} ${pick(NOUN)}`, color: pick(COLORS) };
   localStorage.setItem("adcity:me", JSON.stringify(m));
   return m;
+}
+
+export function saveMe(m: Me) {
+  localStorage.setItem("adcity:me", JSON.stringify(m));
 }
 
 export function visitUrl(c: Campaign, variant: number, source: string) {

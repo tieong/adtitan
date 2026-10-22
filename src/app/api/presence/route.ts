@@ -5,6 +5,7 @@ const Body = z.object({
   id: z.string().min(1).max(64),
   name: z.string().min(1).max(24),
   color: z.string().max(16),
+  avatar: z.string().max(8).optional(),
   x: z.number().finite(),
   z: z.number().finite(),
   ry: z.number().finite(),

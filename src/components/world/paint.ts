@@ -29,7 +29,7 @@ function fitText(
   let size = start;
   let lines: string[] = [];
   while (size > 24) {
-    ctx.font = `${weight} ${size}px "Geist", "Inter", system-ui, sans-serif`;
+    ctx.font = `${weight} ${size}px "Hanken Grotesk", system-ui, sans-serif`;
     lines = wrap(ctx, text, maxWidth);
     if (lines.length <= maxLines && lines.every((l) => ctx.measureText(l).width <= maxWidth)) break;
     size -= 4;
@@ -87,7 +87,7 @@ export function paintAd(
 
   // Brand line
   ctx.fillStyle = fg;
-  ctx.font = `600 34px "Geist", system-ui, sans-serif`;
+  ctx.font = `600 34px "Hanken Grotesk", system-ui, sans-serif`;
   ctx.fillText(`${c.emoji}  ${c.name}`, pad, pad + 26);
   ctx.fillStyle = accent;
   ctx.fillRect(pad, pad + 50, 64, 6);
@@ -112,7 +112,7 @@ export function paintAd(
   ctx.globalAlpha = 1;
 
   // CTA pill
-  ctx.font = `700 38px "Geist", system-ui, sans-serif`;
+  ctx.font = `700 38px "Hanken Grotesk", system-ui, sans-serif`;
   const label = `${v.cta}  →`;
   const cw = ctx.measureText(label).width + 72;
   roundRect(ctx, pad, AD_H - pad - 84, cw, 84, 42);
@@ -124,7 +124,7 @@ export function paintAd(
 
   // Footer tag
   ctx.textAlign = "right";
-  ctx.font = `500 26px "Geist Mono", ui-monospace, monospace`;
+  ctx.font = `500 26px ui-monospace, monospace`;
   ctx.fillStyle = fg;
   ctx.globalAlpha = 0.55;
   ctx.fillText(`AD · ${c.category.toUpperCase()}`, AD_W - pad, AD_H - pad - 41);
@@ -151,9 +151,9 @@ export function paintPlaceholder(ctx: CanvasRenderingContext2D, n: number) {
   }
   ctx.textAlign = "center";
   ctx.fillStyle = "#ffffff";
-  ctx.font = `800 110px "Geist", system-ui, sans-serif`;
+  ctx.font = `800 110px "Hanken Grotesk", system-ui, sans-serif`;
   ctx.fillText("YOUR AD HERE", AD_W / 2, AD_H / 2 - 20);
-  ctx.font = `500 40px "Geist Mono", ui-monospace, monospace`;
+  ctx.font = `500 40px ui-monospace, monospace`;
   ctx.fillStyle = "#7cf7ff";
   ctx.fillText(`Paste your repo → billboard #${n}`, AD_W / 2, AD_H / 2 + 60);
 }

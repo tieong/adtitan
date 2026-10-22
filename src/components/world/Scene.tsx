@@ -1,143 +1,164 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, Stars, useCursor } from "@react-three/drei";
+import { Html, useCursor, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import type { Campaign, Player } from "@/lib/types";
 import { imageUrl } from "@/lib/format";
-import { BLOCK, LIMIT, SPACING, blocks, buildings, collide, slots, type Slot } from "./city";
+import manifest from "../../../public/city/manifest.json";
+import { BLOCK, HALF, LIMIT, ROAD, SPACING, blocks, collide, neighbours, nodes, props, slots, type Slot, type SpriteName } from "./city";
 import { AD_H, AD_W, paintAd, paintPlaceholder } from "./paint";
 import type { Tracker } from "./tracker";
 
-export const BOARD_W = 15;
-export const BOARD_H = 10;
-const ROTATE_MS = 9000;
+// Isometric camera: 45 degrees around, 30 degrees above the ground.
+export const PITCH = Math.PI / 6;
+export const YAW = Math.PI / 4;
+const CAM_DIST = 80;
+export const CAM_OFFSET = new THREE.Vector3(
+  Math.sin(YAW) * Math.cos(PITCH) * CAM_DIST,
+  Math.sin(PITCH) * CAM_DIST,
+  Math.cos(YAW) * Math.cos(PITCH) * CAM_DIST,
+);
+// Directions on the ground that read as screen up and screen right.
+const SCREEN_UP = new THREE.Vector2(-1, -1).normalize();
+const SCREEN_RIGHT = new THREE.Vector2(1, -1).normalize();
 
-// ---------- Ground, streets, buildings ----------
+export const AVATARS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"] as const;
+export type Avatar = (typeof AVATARS)[number];
 
-function windowTexture() {
-  const c = document.createElement("canvas");
-  c.width = 64;
-  c.height = 128;
-  const ctx = c.getContext("2d")!;
-  ctx.fillStyle = "#05060a";
-  ctx.fillRect(0, 0, 64, 128);
-  for (let y = 4; y < 128; y += 8) {
-    for (let x = 4; x < 64; x += 8) {
-      const r = Math.random();
-      ctx.fillStyle = r > 0.72 ? (r > 0.93 ? "#7cf7ff" : "#ffd9a0") : "#0b0d14";
-      ctx.globalAlpha = r > 0.72 ? 0.35 + Math.random() * 0.65 : 1;
-      ctx.fillRect(x, y, 4, 5);
-    }
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  return t;
-}
+const sizes = manifest as Record<string, { w: number; h: number }>;
+const url = (name: string) => `/city/${name}.webp`;
 
-function Buildings() {
-  const ref = useRef<THREE.InstancedMesh>(null);
-  const tex = useMemo(() => windowTexture(), []);
-  useEffect(() => {
-    const m = new THREE.Matrix4();
-    const col = new THREE.Color();
-    buildings.forEach((b, i) => {
-      m.compose(
-        new THREE.Vector3(b.x, b.h / 2, b.z),
-        new THREE.Quaternion(),
-        new THREE.Vector3(b.w, b.h, b.d),
-      );
-      ref.current!.setMatrixAt(i, m);
-      col.setHSL(0.62 + b.tint * 0.12, 0.25, 0.09 + b.tint * 0.05);
-      ref.current!.setColorAt(i, col);
-    });
-    ref.current!.instanceMatrix.needsUpdate = true;
-    if (ref.current!.instanceColor) ref.current!.instanceColor.needsUpdate = true;
-  }, []);
+// ---------- Standee: a cut-out sprite standing upright, turned to the camera ----------
+
+type StandeeProps = { name: string; width: number; flip?: boolean; position?: [number, number, number] };
+
+/**
+ * Vertical plane anchored at its bottom centre. The camera looks down at 30 degrees, so the
+ * plane is stretched by 1/cos(pitch) to show the art at its drawn proportions. alphaToCoverage
+ * writes depth only where the art is, which gives correct overlap between sprites and 3D objects.
+ */
+const Standee = forwardRef<THREE.Group, StandeeProps>(function Standee({ name, width, flip = false, position }, ref) {
+  const tex = useTexture(url(name));
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const s = sizes[name] ?? { w: 1, h: 1 };
+  const height = (width * (s.h / s.w)) / Math.cos(PITCH);
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, buildings.length]} castShadow={false}>
-      <boxGeometry />
-      <meshStandardMaterial
-        map={tex}
-        emissiveMap={tex}
-        emissive="#ffffff"
-        emissiveIntensity={0.9}
-        roughness={0.85}
-        metalness={0.2}
-      />
-    </instancedMesh>
+    <group ref={ref} position={position} rotation-y={YAW}>
+      <mesh position-y={height / 2} scale-x={flip ? -1 : 1}>
+        <planeGeometry args={[width, height]} />
+        <meshBasicMaterial map={tex} alphaTest={0.5} alphaToCoverage side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+});
+
+function BlobShadow({ radius, opacity = 0.18 }: { radius: number; opacity?: number }) {
+  return (
+    <mesh rotation-x={-Math.PI / 2} position-y={0.03} scale={[1, 0.62, 1]} renderOrder={1}>
+      <circleGeometry args={[radius, 24]} />
+      <meshBasicMaterial color="#1f3a2a" transparent opacity={opacity} depthWrite={false} />
+    </mesh>
   );
 }
 
-function Ground() {
-  const lines = useMemo(() => {
-    const out: { x: number; z: number; w: number; d: number }[] = [];
-    const span = LIMIT * 2;
-    for (let i = -2; i <= 1; i++) {
-      const p = (i + 0.5) * SPACING;
-      for (let s = -LIMIT; s < LIMIT; s += 6) {
-        out.push({ x: p, z: s, w: 0.25, d: 2.6 });
-        out.push({ x: s, z: p, w: 2.6, d: 0.25 });
+// ---------- Ground ----------
+
+function Ground({ onPick }: { onPick: (p: THREE.Vector3) => void }) {
+  const dashes = useMemo(() => {
+    const out: { x: number; z: number; rot: boolean }[] = [];
+    for (let k = -HALF; k <= HALF + 1; k++) {
+      const p = (k - 0.5) * SPACING;
+      for (let s = -LIMIT + 2; s < LIMIT; s += 4) {
+        // Skip the dashes inside intersections.
+        if (Math.abs(((s + LIMIT) % SPACING) - SPACING / 2) > ROAD / 2 + 2) continue;
+        out.push({ x: p, z: s, rot: false });
+        out.push({ x: s, z: p, rot: true });
       }
     }
-    return { out, span };
+    return out;
   }, []);
   return (
-    <group>
-      <mesh rotation-x={-Math.PI / 2} position-y={-0.01}>
-        <planeGeometry args={[LIMIT * 2 + 200, LIMIT * 2 + 200]} />
-        <meshStandardMaterial color="#090a10" roughness={0.6} metalness={0.4} />
+    <group
+      onClick={(e) => {
+        if (e.delta > 6) return;
+        e.stopPropagation();
+        onPick(e.point);
+      }}
+    >
+      <mesh rotation-x={-Math.PI / 2} position-y={-0.05}>
+        <planeGeometry args={[LIMIT * 6, LIMIT * 6]} />
+        <meshLambertMaterial color="#a9dc7f" />
       </mesh>
-      {blocks.map((b) =>
-        b.plaza ? (
-          <mesh key={`${b.x}:${b.z}`} rotation-x={-Math.PI / 2} position={[b.x, 0.02, b.z]}>
-            <circleGeometry args={[BLOCK / 2 + 3, 64]} />
-            <meshStandardMaterial color="#10131c" roughness={0.3} metalness={0.6} />
-          </mesh>
-        ) : (
-          <mesh key={`${b.x}:${b.z}`} position={[b.x, 0.15, b.z]}>
-            <boxGeometry args={[BLOCK, 0.3, BLOCK]} />
-            <meshStandardMaterial color="#14161f" roughness={0.9} />
-          </mesh>
-        ),
-      )}
-      {lines.out.map((l, i) => (
-        <mesh key={i} rotation-x={-Math.PI / 2} position={[l.x, 0.01, l.z]}>
-          <planeGeometry args={[l.w, l.d]} />
-          <meshBasicMaterial color="#2a2f44" />
+      <mesh rotation-x={-Math.PI / 2} position-y={0}>
+        <planeGeometry args={[LIMIT * 2, LIMIT * 2]} />
+        <meshLambertMaterial color="#d3d8df" />
+      </mesh>
+      {dashes.map((d, i) => (
+        <mesh key={i} rotation-x={-Math.PI / 2} rotation-z={d.rot ? Math.PI / 2 : 0} position={[d.x, 0.02, d.z]}>
+          <planeGeometry args={[0.35, 1.8]} />
+          <meshBasicMaterial color="#ffffff" />
         </mesh>
       ))}
-      <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
-        <ringGeometry args={[BLOCK / 2 + 2.6, BLOCK / 2 + 3, 96]} />
-        <meshBasicMaterial color="#7cf7ff" toneMapped={false} />
-      </mesh>
+      {blocks.map((b) =>
+        b.plaza ? (
+          <group key={`${b.x}:${b.z}`} position={[b.x, 0, b.z]}>
+            <mesh position-y={0.12}>
+              <boxGeometry args={[BLOCK + 2, 0.24, BLOCK + 2]} />
+              <meshLambertMaterial color="#f3e7d2" />
+            </mesh>
+            <mesh rotation-x={-Math.PI / 2} position-y={0.25}>
+              <ringGeometry args={[7.5, 8.2, 48]} />
+              <meshBasicMaterial color="#e2d2b4" />
+            </mesh>
+          </group>
+        ) : (
+          <group key={`${b.x}:${b.z}`} position={[b.x, 0, b.z]}>
+            <mesh position-y={0.12}>
+              <boxGeometry args={[BLOCK, 0.24, BLOCK]} />
+              <meshLambertMaterial color="#efe7d6" />
+            </mesh>
+            <mesh position-y={0.27}>
+              <boxGeometry args={[BLOCK - 2.4, 0.08, BLOCK - 2.4]} />
+              <meshLambertMaterial color="#9fd67a" />
+            </mesh>
+          </group>
+        ),
+      )}
     </group>
+  );
+}
+
+function Props() {
+  return (
+    <>
+      {props.map((p, i) => (
+        <group key={i} position={[p.x, 0.25, p.z]}>
+          <BlobShadow radius={p.width * 0.42} opacity={p.width > 8 ? 0.12 : 0.16} />
+          <Standee name={p.sprite as SpriteName} width={p.width} />
+        </group>
+      ))}
+    </>
   );
 }
 
 // ---------- Billboards ----------
 
-function useImage(url: string | null) {
+function useImage(src: string | null) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   useEffect(() => {
-    if (!url) return;
+    if (!src) return;
     const i = new Image();
     i.onload = () => setImg(i);
-    i.src = url;
-  }, [url]);
+    i.src = src;
+  }, [src]);
   return img;
 }
 
-function useAdTexture(campaign: Campaign | null, variant: number, placeholderN: number) {
-  const canvas = useMemo(() => {
-    const c = document.createElement("canvas");
-    c.width = AD_W;
-    c.height = AD_H;
-    return c;
-  }, []);
+function useAdTexture(campaign: Campaign | null, variant: number, n: number) {
+  const canvas = useMemo(() => Object.assign(document.createElement("canvas"), { width: AD_W, height: AD_H }), []);
   const texture = useMemo(() => {
     const t = new THREE.CanvasTexture(canvas);
     t.colorSpace = THREE.SRGBColorSpace;
@@ -148,24 +169,28 @@ function useAdTexture(campaign: Campaign | null, variant: number, placeholderN: 
   useEffect(() => {
     const ctx = canvas.getContext("2d")!;
     if (campaign) paintAd(ctx, campaign, variant, img);
-    else paintPlaceholder(ctx, placeholderN);
+    else paintPlaceholder(ctx, n);
     texture.needsUpdate = true;
-  }, [canvas, texture, campaign, variant, img, placeholderN]);
+  }, [canvas, texture, campaign, variant, img, n]);
   return texture;
 }
 
+const ROTATE_MS = 9000;
 function useVariant(campaign: Campaign | null, offset: number) {
   const [v, setV] = useState(0);
   useEffect(() => {
     if (!campaign || campaign.variants.length < 2) return;
-    const n = campaign.variants.length;
-    const tick = () => setV(Math.floor((Date.now() + offset * 1700) / ROTATE_MS) % n);
+    const tick = () => setV(Math.floor((Date.now() + offset * 1700) / ROTATE_MS) % campaign.variants.length);
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
   }, [campaign, offset]);
   return v;
 }
+
+const BOARD_W = 7.5;
+const BOARD_H = 5;
+const POST = 3.2;
 
 function Billboard({
   slot,
@@ -184,10 +209,9 @@ function Billboard({
   const texture = useAdTexture(campaign, variant, slot.index + 1);
   const [hover, setHover] = useState(false);
   useCursor(hover && !!campaign);
-  const frame = useRef<THREE.MeshBasicMaterial>(null);
-  const accent = campaign?.palette.accent ?? "#7cf7ff";
   const variantRef = useRef(variant);
   variantRef.current = variant;
+  const board = useRef<THREE.Group>(null);
 
   useEffect(() => {
     if (!campaign) return;
@@ -195,258 +219,349 @@ function Billboard({
   }, [campaign, slot, tracker]);
 
   useFrame(({ clock }) => {
-    if (!frame.current) return;
-    const pulse = highlighted ? 0.6 + Math.sin(clock.elapsedTime * 5) * 0.4 : hover ? 1 : 0.55;
-    frame.current.opacity = pulse;
+    if (!board.current) return;
+    const lift = highlighted ? Math.abs(Math.sin(clock.elapsedTime * 3)) * 0.25 : hover ? 0.12 : 0;
+    board.current.position.y += (POST + BOARD_H / 2 + lift - board.current.position.y) * 0.2;
   });
 
-  const click = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (campaign) onSelect(campaign, variant);
-  };
-
-  const lift = 5.5;
+  const accent = campaign?.palette.accent ?? "#e4f222";
   return (
-    <group position={[slot.x, 0, slot.z]} rotation-y={slot.ry}>
-      {[-BOARD_W / 2 + 1.2, BOARD_W / 2 - 1.2].map((x) => (
-        <mesh key={x} position={[x, lift / 2, -0.25]}>
-          <boxGeometry args={[0.35, lift, 0.35]} />
-          <meshStandardMaterial color="#1b1e2b" metalness={0.8} roughness={0.3} />
+    <group position={[slot.x, 0.25, slot.z]} rotation-y={slot.ry}>
+      <BlobShadow radius={3.4} opacity={0.12} />
+      {[-BOARD_W / 2 + 1, BOARD_W / 2 - 1].map((x) => (
+        <mesh key={x} position={[x, POST / 2, -0.15]}>
+          <cylinderGeometry args={[0.14, 0.14, POST, 10]} />
+          <meshLambertMaterial color="#5b6475" />
         </mesh>
       ))}
-      <mesh position={[0, lift + BOARD_H / 2, -0.35]}>
-        <boxGeometry args={[BOARD_W + 0.8, BOARD_H + 0.8, 0.4]} />
-        <meshStandardMaterial color="#0d0f17" metalness={0.7} roughness={0.35} />
-      </mesh>
-      <mesh position={[0, lift + BOARD_H / 2, -0.13]}>
-        <planeGeometry args={[BOARD_W + 0.5, BOARD_H + 0.5]} />
-        <meshBasicMaterial ref={frame} color={accent} transparent toneMapped={false} />
-      </mesh>
-      <mesh
-        position={[0, lift + BOARD_H / 2, -0.1]}
-        onClick={click}
-        onPointerOver={(e) => (e.stopPropagation(), setHover(true))}
-        onPointerOut={() => setHover(false)}
-      >
-        <planeGeometry args={[BOARD_W, BOARD_H]} />
-        <meshBasicMaterial map={texture} toneMapped={false} />
-      </mesh>
-      <pointLight position={[0, lift + BOARD_H / 2, 4]} color={accent} intensity={25} distance={16} decay={2} />
-    </group>
-  );
-}
-
-/** Four-sided screen tower in the plaza cycling through every campaign. */
-function Tower({ campaigns, onSelect }: { campaigns: Campaign[]; onSelect: (c: Campaign, v: number) => void }) {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    if (campaigns.length < 2) return;
-    const id = setInterval(() => setI((x) => (x + 1) % campaigns.length), 6000);
-    return () => clearInterval(id);
-  }, [campaigns.length]);
-  const c = campaigns.length ? campaigns[i % campaigns.length] : null;
-  const texture = useAdTexture(c, 0, 0);
-  const spin = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (spin.current) spin.current.rotation.y += dt * 0.12;
-  });
-  const W = 12;
-  const H = 8;
-  const Y = 16;
-  return (
-    <group>
-      <mesh position={[0, Y / 2, 0]}>
-        <cylinderGeometry args={[1.2, 1.8, Y, 16]} />
-        <meshStandardMaterial color="#141826" metalness={0.9} roughness={0.25} />
-      </mesh>
-      <group ref={spin} position={[0, Y + H / 2, 0]}>
-        {[0, 1, 2, 3].map((k) => (
-          <group key={k} rotation-y={(k * Math.PI) / 2}>
-            <mesh position={[0, 0, W / 2 + 0.02]} onClick={(e) => (e.stopPropagation(), c && onSelect(c, 0))}>
-              <planeGeometry args={[W, H]} />
-              <meshBasicMaterial map={texture} toneMapped={false} />
-            </mesh>
-          </group>
-        ))}
-        <mesh>
-          <boxGeometry args={[W - 0.05, H + 0.6, W - 0.05]} />
-          <meshStandardMaterial color="#05060a" />
+      <group ref={board} position-y={POST + BOARD_H / 2}>
+        <mesh position-z={-0.2}>
+          <boxGeometry args={[BOARD_W + 0.5, BOARD_H + 0.5, 0.3]} />
+          <meshLambertMaterial color={highlighted || hover ? accent : "#ffffff"} />
         </mesh>
-        <mesh position={[0, H / 2 + 0.5, 0]}>
-          <boxGeometry args={[W + 0.4, 0.25, W + 0.4]} />
-          <meshBasicMaterial color={c?.palette.accent ?? "#7cf7ff"} toneMapped={false} />
+        <mesh
+          position-z={-0.04}
+          onClick={(e: ThreeEvent<MouseEvent>) => {
+            e.stopPropagation();
+            if (campaign) onSelect(campaign, variant);
+          }}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHover(true);
+          }}
+          onPointerOut={() => setHover(false)}
+        >
+          <planeGeometry args={[BOARD_W, BOARD_H]} />
+          <meshBasicMaterial map={texture} toneMapped={false} />
         </mesh>
       </group>
     </group>
   );
 }
 
-// ---------- Players ----------
+// ---------- Plaza screen: plays the video ads one after another ----------
 
-function Avatar({ color, name, isMe }: { color: string; name: string; isMe?: boolean }) {
+type VideoAdRef = { campaign: Campaign; videoId: string; format: string };
+
+function PlazaScreen({ onSelect }: { onSelect: (c: Campaign, v: number) => void }) {
+  const [ads, setAds] = useState<VideoAdRef[]>([]);
+  const [i, setI] = useState(0);
+  const video = useMemo(() => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.crossOrigin = "anonymous";
+    return v;
+  }, []);
+  const texture = useMemo(() => {
+    const t = new THREE.VideoTexture(video);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, [video]);
+
+  useEffect(() => {
+    fetch("/api/videos")
+      .then((r) => r.json())
+      .then((list: VideoAdRef[]) => setAds(list.filter((a) => a.format === "vertical")))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!ads.length) return;
+    video.src = `/api/videos/${ads[i % ads.length].videoId}/file`;
+    video.play().catch(() => {});
+    const next = () => setI((x) => x + 1);
+    video.addEventListener("ended", next);
+    return () => video.removeEventListener("ended", next);
+  }, [ads, i, video]);
+  useEffect(() => () => video.pause(), [video]);
+
+  const W = 5.4;
+  const H = 9.6;
+  const current = ads.length ? ads[i % ads.length] : null;
   return (
-    <group>
-      <mesh position-y={1}>
-        <capsuleGeometry args={[0.45, 1, 6, 12]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.6} roughness={0.4} />
+    <group position={[-1.5, 0.25, -1.5]} rotation-y={YAW}>
+      <mesh position-y={2.5}>
+        <boxGeometry args={[1.2, 5, 1.2]} />
+        <meshLambertMaterial color="#5b6475" />
       </mesh>
-      <mesh position={[0, 1.45, 0.38]}>
-        <boxGeometry args={[0.55, 0.18, 0.12]} />
-        <meshBasicMaterial color="#05060a" />
+      <mesh position-y={5 + H / 2}>
+        <boxGeometry args={[W + 0.6, H + 0.6, 0.6]} />
+        <meshLambertMaterial color="#2a2f3a" />
       </mesh>
-      <mesh rotation-x={-Math.PI / 2} position-y={0.02}>
-        <ringGeometry args={[0.6, 0.8, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={0.6} toneMapped={false} />
+      <mesh
+        position={[0, 5 + H / 2, 0.31]}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (current) onSelect(current.campaign, 0);
+        }}
+      >
+        <planeGeometry args={[W, H]} />
+        {ads.length ? <meshBasicMaterial map={texture} toneMapped={false} /> : <meshBasicMaterial color="#11141b" />}
       </mesh>
-      {!isMe && (
-        <Html position={[0, 2.6, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
-          <div className="pointer-events-none flex items-center gap-1.5 rounded-control bg-surface px-2.5 py-1 text-xs whitespace-nowrap text-fg shadow-menu">
-            <span className="inline-block size-1.5 rounded-full" style={{ background: color }} />
-            {name}
-          </div>
+    </group>
+  );
+}
+
+// ---------- Characters ----------
+
+type Facing = { front: boolean; flip: boolean };
+
+/** Which of the two drawn views to show, and mirrored or not, for a ground direction. */
+function facingFor(dx: number, dz: number, prev: Facing): Facing {
+  if (Math.abs(dx) + Math.abs(dz) < 1e-4) return prev;
+  const up = dx * SCREEN_UP.x + dz * SCREEN_UP.y;
+  const right = dx * SCREEN_RIGHT.x + dz * SCREEN_RIGHT.y;
+  const front = up < 0;
+  // The front view walks toward the bottom left, the back view toward the top right.
+  return { front, flip: front ? right > 0 : right < 0 };
+}
+
+function Character({
+  avatar,
+  pos,
+  moving,
+  label,
+}: {
+  avatar: string;
+  pos: React.RefObject<{ x: number; z: number; dx: number; dz: number }>;
+  moving: React.RefObject<boolean>;
+  label?: React.ReactNode;
+}) {
+  const root = useRef<THREE.Group>(null);
+  const body = useRef<THREE.Group>(null);
+  const [facing, setFacing] = useState<Facing>({ front: true, flip: false });
+  const facingRef = useRef(facing);
+  const phase = useMemo(() => Math.random() * 10, []);
+
+  useFrame(({ clock }) => {
+    const p = pos.current;
+    if (!root.current || !body.current) return;
+    root.current.position.set(p.x, 0.25, p.z);
+    const t = clock.elapsedTime * 9 + phase;
+    if (moving.current) {
+      body.current.position.y = Math.abs(Math.sin(t)) * 0.28;
+      body.current.rotation.z = Math.sin(t) * 0.05;
+      body.current.scale.set(1, 1 - Math.abs(Math.cos(t)) * 0.03, 1);
+      const f = facingFor(p.dx, p.dz, facingRef.current);
+      if (f.front !== facingRef.current.front || f.flip !== facingRef.current.flip) {
+        facingRef.current = f;
+        setFacing(f);
+      }
+    } else {
+      body.current.position.y = 0;
+      body.current.rotation.z = 0;
+      body.current.scale.set(1, 1 + Math.sin(clock.elapsedTime * 2 + phase) * 0.012, 1);
+    }
+  });
+
+  return (
+    <group ref={root}>
+      <BlobShadow radius={0.85} opacity={0.22} />
+      <group ref={body}>
+        <Standee name={`${avatar}-${facing.front ? "front" : "back"}`} width={1.9} flip={facing.flip} />
+      </group>
+      {label && (
+        <Html position={[0, 4.4, 0]} center distanceFactor={undefined} zIndexRange={[10, 0]}>
+          {label}
         </Html>
       )}
     </group>
   );
 }
 
-function Others({ players }: { players: Player[] }) {
+function NameTag({ name, color }: { name: string; color: string }) {
   return (
-    <>
-      {players.map((p) => (
-        <Ghost key={p.id} p={p} />
-      ))}
-    </>
+    <div className="pointer-events-none flex items-center gap-1.5 rounded-control bg-raised px-2.5 py-1 text-xs font-medium whitespace-nowrap text-fg shadow-menu">
+      <span className="inline-block size-2 rounded-full" style={{ background: color }} />
+      {name}
+    </div>
   );
 }
 
-function Ghost({ p }: { p: Player }) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    const g = ref.current;
-    if (!g) return;
-    const k = 1 - Math.exp(-dt * 6);
-    g.position.x += (p.x - g.position.x) * k;
-    g.position.z += (p.z - g.position.z) * k;
-    g.rotation.y += (p.ry - g.rotation.y) * k;
+/** Ambient passers-by walking the sidewalks from corner to corner. */
+function Walker({ seed }: { seed: number }) {
+  const r = useMemo(() => {
+    let s = seed * 9301 + 49297;
+    return () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  }, [seed]);
+  const avatar = AVATARS[seed % AVATARS.length];
+  const side = useMemo(() => (r() > 0.5 ? 1 : -1) * (ROAD / 2 - 1.2), [r]);
+  const state = useRef({ from: nodes[Math.floor(r() * nodes.length)], to: nodes[0], t: 0, wait: r() * 3 });
+  const pos = useRef({ x: 0, z: 0, dx: 0, dz: 0 });
+  const moving = useRef(false);
+  useMemo(() => {
+    const n = neighbours(state.current.from);
+    state.current.to = n[Math.floor(r() * n.length)];
+  }, [r]);
+
+  useFrame((_, rawDt) => {
+    const dt = Math.min(rawDt, 0.05);
+    const s = state.current;
+    if (s.wait > 0) {
+      s.wait -= dt;
+      moving.current = false;
+    } else {
+      const len = Math.hypot(s.to.x - s.from.x, s.to.z - s.from.z);
+      s.t += (dt * 2.6) / len;
+      moving.current = true;
+      if (s.t >= 1) {
+        const n = neighbours(s.to).filter((m) => m !== s.from);
+        s.from = s.to;
+        s.to = n[Math.floor(r() * n.length)] ?? s.from;
+        s.t = 0;
+        if (r() < 0.3) s.wait = 1 + r() * 3;
+      }
+    }
+    const dx = s.to.x - s.from.x;
+    const dz = s.to.z - s.from.z;
+    const len = Math.hypot(dx, dz) || 1;
+    // Keep to one side of the road, like a sidewalk.
+    const ox = (-dz / len) * side;
+    const oz = (dx / len) * side;
+    pos.current = { x: s.from.x + dx * s.t + ox, z: s.from.z + dz * s.t + oz, dx, dz };
   });
-  return (
-    <group ref={ref} position={[p.x, 0, p.z]}>
-      <Avatar color={p.color} name={p.name} />
-    </group>
-  );
+
+  return <Character avatar={avatar} pos={pos} moving={moving} />;
 }
+
+function Ghost({ p }: { p: Player }) {
+  const pos = useRef({ x: p.x, z: p.z, dx: 0, dz: 0 });
+  const moving = useRef(false);
+  const target = useRef(p);
+  target.current = p;
+  useFrame((_, dt) => {
+    const k = 1 - Math.exp(-dt * 6);
+    const c = pos.current;
+    const dx = target.current.x - c.x;
+    const dz = target.current.z - c.z;
+    moving.current = Math.hypot(dx, dz) > 0.05;
+    pos.current = { x: c.x + dx * k, z: c.z + dz * k, dx, dz };
+  });
+  return <Character avatar={p.avatar ?? "c1"} pos={pos} moving={moving} label={<NameTag name={p.name} color={p.color} />} />;
+}
+
+// ---------- The player and the camera ----------
 
 export type Pose = { x: number; z: number; ry: number };
 
 function Me({
-  color,
+  avatar,
   pose,
   target,
   tracker,
   teleport,
 }: {
-  color: string;
+  avatar: string;
   pose: React.RefObject<Pose>;
   target: React.RefObject<THREE.Vector3 | null>;
   tracker: Tracker;
   teleport: Pose | null;
 }) {
-  const ref = useRef<THREE.Group>(null);
   const keys = useRef(new Set<string>());
-  const yaw = useRef(pose.current.ry + Math.PI);
-  const drag = useRef<{ x: number } | null>(null);
   const { camera, gl } = useThree();
+  const pos = useRef({ x: pose.current.x, z: pose.current.z, dx: 1, dz: 1 });
+  const moving = useRef(false);
+  const look = useRef(new THREE.Vector3(pose.current.x, 0, pose.current.z));
 
   useEffect(() => {
     if (!teleport) return;
     pose.current = { ...teleport };
-    yaw.current = teleport.ry + Math.PI;
+    pos.current = { ...pos.current, x: teleport.x, z: teleport.z };
     target.current = null;
   }, [teleport, pose, target]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+      if ((e.target as HTMLElement)?.closest("input, textarea")) return;
       keys.current.add(e.key.toLowerCase());
     };
     const up = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
-    const el = gl.domElement;
-    const pd = (e: PointerEvent) => (drag.current = { x: e.clientX });
-    const pm = (e: PointerEvent) => {
-      if (!drag.current) return;
-      yaw.current -= (e.clientX - drag.current.x) * 0.006;
-      drag.current.x = e.clientX;
-    };
-    const pu = () => (drag.current = null);
+    const blur = () => keys.current.clear();
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
-    el.addEventListener("pointerdown", pd);
-    window.addEventListener("pointermove", pm);
-    window.addEventListener("pointerup", pu);
+    window.addEventListener("blur", blur);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
-      el.removeEventListener("pointerdown", pd);
-      window.removeEventListener("pointermove", pm);
-      window.removeEventListener("pointerup", pu);
+      window.removeEventListener("blur", blur);
     };
-  }, [gl]);
+  }, []);
 
-  const camPos = useRef(new THREE.Vector3(0, 6, 12));
-  const look = useRef(new THREE.Vector3());
+  // Wheel zoom on the orthographic camera.
+  useEffect(() => {
+    const el = gl.domElement;
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const cam = camera as THREE.OrthographicCamera;
+      cam.zoom = THREE.MathUtils.clamp(cam.zoom * (e.deltaY > 0 ? 0.9 : 1.1), 9, 40);
+      cam.updateProjectionMatrix();
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => el.removeEventListener("wheel", wheel);
+  }, [camera, gl]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const k = keys.current;
     const p = pose.current;
-    const run = k.has("shift") ? 2 : 1;
-    const turn = (k.has("arrowleft") || k.has("q") ? 1 : 0) - (k.has("arrowright") || k.has("e") ? 1 : 0);
-    yaw.current += turn * dt * 2.2;
-    const fwd = (k.has("w") || k.has("z") || k.has("arrowup") ? 1 : 0) - (k.has("s") || k.has("arrowdown") ? 1 : 0);
-    const side = (k.has("d") ? 1 : 0) - (k.has("a") ? 1 : 0);
-    // Camera looks along -yaw; forward is away from the camera.
-    const fx = -Math.sin(yaw.current);
-    const fz = -Math.cos(yaw.current);
-    let mx = (fx * fwd - fz * side) * 11 * run * dt;
-    let mz = (fz * fwd + fx * side) * 11 * run * dt;
-
-    if (fwd || side) target.current = null;
+    const upKey = k.has("w") || k.has("z") || k.has("arrowup") ? 1 : 0;
+    const downKey = k.has("s") || k.has("arrowdown") ? 1 : 0;
+    const leftKey = k.has("a") || k.has("q") || k.has("arrowleft") ? 1 : 0;
+    const rightKey = k.has("d") || k.has("arrowright") ? 1 : 0;
+    const sy = upKey - downKey;
+    const sx = rightKey - leftKey;
+    const speed = (k.has("shift") ? 16 : 9) * dt;
+    let mx = (SCREEN_UP.x * sy + SCREEN_RIGHT.x * sx) * speed;
+    let mz = (SCREEN_UP.y * sy + SCREEN_RIGHT.y * sx) * speed;
+    if (sx && sy) {
+      mx *= Math.SQRT1_2;
+      mz *= Math.SQRT1_2;
+    }
+    if (sx || sy) target.current = null;
     else if (target.current) {
       const dx = target.current.x - p.x;
       const dz = target.current.z - p.z;
       const d = Math.hypot(dx, dz);
-      if (d < 0.5) target.current = null;
+      if (d < 0.3) target.current = null;
       else {
-        const s = Math.min(d, 14 * dt);
+        const s = Math.min(d, 10 * dt);
         mx = (dx / d) * s;
         mz = (dz / d) * s;
       }
     }
-    if (mx || mz) {
+    moving.current = !!(mx || mz);
+    if (moving.current) {
       [p.x, p.z] = collide(p.x + mx, p.z + mz);
-      const want = Math.atan2(mx, mz);
-      let diff = want - p.ry;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      p.ry += diff * Math.min(1, dt * 10);
+      p.ry = Math.atan2(mx, mz);
+      pos.current = { x: p.x, z: p.z, dx: mx, dz: mz };
     }
-    const g = ref.current!;
-    g.position.set(p.x, 0, p.z);
-    g.rotation.y = p.ry;
-
-    const want = new THREE.Vector3(p.x + Math.sin(yaw.current) * 13, 6.5, p.z + Math.cos(yaw.current) * 13);
-    camPos.current.lerp(want, 1 - Math.exp(-dt * 6));
-    camera.position.copy(camPos.current);
-    look.current.lerp(new THREE.Vector3(p.x - Math.sin(yaw.current) * 6, 5, p.z - Math.cos(yaw.current) * 6), 1 - Math.exp(-dt * 8));
+    look.current.lerp(new THREE.Vector3(p.x, 0, p.z), 1 - Math.exp(-dt * 5));
+    camera.position.copy(look.current).add(CAM_OFFSET);
     camera.lookAt(look.current);
-    tracker.tick(camera);
+    tracker.tick(camera, look.current);
   });
 
-  return (
-    <group ref={ref}>
-      <Avatar color={color} name="you" isMe />
-    </group>
-  );
+  return <Character avatar={avatar} pos={pos} moving={moving} />;
 }
 
 // ---------- Root ----------
@@ -454,7 +569,7 @@ function Me({
 export function Scene({
   campaigns,
   players,
-  color,
+  avatar,
   pose,
   teleport,
   tracker,
@@ -463,7 +578,7 @@ export function Scene({
 }: {
   campaigns: Campaign[];
   players: Player[];
-  color: string;
+  avatar: string;
   pose: React.RefObject<Pose>;
   teleport: Pose | null;
   tracker: Tracker;
@@ -471,33 +586,29 @@ export function Scene({
   onSelect: (c: Campaign, variant: number) => void;
 }) {
   const target = useRef<THREE.Vector3 | null>(null);
-  const shown = Math.max(campaigns.length + 4, 16);
   const marker = useRef<THREE.Mesh>(null);
-  useFrame(() => {
+  const shown = Math.min(slots.length, Math.max(campaigns.length + 3, 10));
+  useFrame(({ clock }) => {
     if (!marker.current) return;
     marker.current.visible = !!target.current;
-    if (target.current) marker.current.position.set(target.current.x, 0.05, target.current.z);
+    if (target.current) {
+      marker.current.position.set(target.current.x, 0.3, target.current.z);
+      marker.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 6) * 0.08);
+    }
   });
 
   return (
     <>
-      <color attach="background" args={["#04050a"]} />
-      <fog attach="fog" args={["#04050a", 40, 190]} />
-      <ambientLight intensity={0.5} color="#8fa3ff" />
-      <hemisphereLight args={["#3b4a8a", "#05060a", 0.6]} />
-      <directionalLight position={[60, 90, 30]} intensity={0.6} color="#b9c6ff" />
-      <Stars radius={260} depth={60} count={2500} factor={6} fade speed={0.5} />
-      <group
-        onClick={(e) => {
-          if (e.delta > 4) return;
-          const [x, z] = collide(e.point.x, e.point.z);
+      <hemisphereLight args={["#ffffff", "#b8d99a", 1.6]} />
+      <directionalLight position={[-30, 60, 20]} intensity={1.4} color="#fff6e5" />
+      <Ground
+        onPick={(p) => {
+          const [x, z] = collide(p.x, p.z);
           target.current = new THREE.Vector3(x, 0, z);
         }}
-      >
-        <Ground />
-      </group>
-      <Buildings />
-      <Tower campaigns={campaigns} onSelect={onSelect} />
+      />
+      <Props />
+      <PlazaScreen onSelect={onSelect} />
       {slots.slice(0, shown).map((s, i) => (
         <Billboard
           key={s.index}
@@ -508,12 +619,17 @@ export function Scene({
           highlighted={!!campaigns[i] && campaigns[i].id === focusId}
         />
       ))}
+      {Array.from({ length: 14 }, (_, i) => (
+        <Walker key={i} seed={i + 1} />
+      ))}
+      {players.map((p) => (
+        <Ghost key={p.id} p={p} />
+      ))}
       <mesh ref={marker} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.5, 0.8, 32]} />
-        <meshBasicMaterial color="#7cf7ff" toneMapped={false} />
+        <ringGeometry args={[0.5, 0.75, 32]} />
+        <meshBasicMaterial color="#7c8700" />
       </mesh>
-      <Me color={color} pose={pose} target={target} tracker={tracker} teleport={teleport} />
-      <Others players={players} />
+      <Me avatar={avatar} pose={pose} target={target} tracker={tracker} teleport={teleport} />
     </>
   );
 }
