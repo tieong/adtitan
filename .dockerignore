@@ -1,0 +1,7 @@
+node_modules
+.next
+.open-next
+.wrangler
+.env*
+.git
+public/city/raw

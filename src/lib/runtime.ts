@@ -29,16 +29,28 @@ function nodePool(url: string): Pool {
   return g.__pgPool;
 }
 
+// One connection per incoming request, keyed on its ExecutionContext; it closes when the request ends.
+const perRequest = new WeakMap<object, Promise<Client>>();
+
+function requestClient(): Promise<Client> {
+  const { env, ctx } = getCloudflareContext() as unknown as {
+    env: { HYPERDRIVE: { connectionString: string } };
+    ctx: object;
+  };
+  let client = perRequest.get(ctx);
+  if (!client) {
+    const c = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    c.on("error", () => perRequest.delete(ctx));
+    client = c.connect().then(() => c);
+    client.catch(() => perRequest.delete(ctx));
+    perRequest.set(ctx, client);
+  }
+  return client;
+}
+
 const workersPg: Pg = {
   async query(text, values) {
-    const env = getCloudflareContext().env as unknown as { HYPERDRIVE: { connectionString: string } };
-    const c = new Client({ connectionString: env.HYPERDRIVE.connectionString });
-    await c.connect();
-    try {
-      return await c.query(text, values);
-    } finally {
-      c.end().catch(() => {});
-    }
+    return (await requestClient()).query(text, values);
   },
 };
 
