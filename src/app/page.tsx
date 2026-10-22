@@ -43,11 +43,14 @@ export default async function Home() {
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-16 px-4 pt-10 pb-16 sm:px-6 sm:pt-20">
         <section className="flex max-w-2xl flex-col gap-6">
           <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">
-            Turn your{" "}
-            <RotatingWord
-              words={["hackathon", "B2B SaaS", "side", "open source", "indie", "AI", "mobile app", "weekend"]}
-            />{" "}
-            project into a video ad
+            {/* The rotating word ends its own line, so changing it never reflows the headline. */}
+            <span className="block">
+              Turn your{" "}
+              <RotatingWord
+                words={["hackathon", "B2B SaaS", "side", "open source", "indie", "AI", "mobile app", "weekend"]}
+              />
+            </span>
+            <span className="block">project into a video ad</span>
           </h1>
           <p className="text-base text-fg-2">
             Paste a GitHub repo or a website. AdCity writes three billboard ads and a 20 second video with a voiceover

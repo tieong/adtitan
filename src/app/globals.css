@@ -6,8 +6,13 @@ body {
 
 /* Home headline: each letter of the rotating word flips down into place. */
 .rotating-word {
-  display: inline-block;
+  display: inline-grid;
   perspective: 600px;
+  vertical-align: bottom;
+}
+.rotating-slot {
+  grid-area: 1 / 1;
+  white-space: nowrap;
 }
 .rotating-char {
   display: inline-block;
