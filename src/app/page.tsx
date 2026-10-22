@@ -2,6 +2,7 @@ import { Nav } from "@/components/Nav";
 import { Generator } from "@/components/Generator";
 import { LiveNumbers } from "@/components/LiveNumbers";
 import { Reel } from "@/components/Reel";
+import { RotatingWord } from "@/components/RotatingWord";
 import { List, ListItem, ListIcon } from "@/components/lime/ui/list";
 import { LinkButton } from "@/components/LinkButton";
 import { ChartLine, Edit, Search, VolumeUp, Video } from "@/components/lime/icon";
@@ -42,7 +43,11 @@ export default async function Home() {
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-16 px-4 pt-10 pb-16 sm:px-6 sm:pt-20">
         <section className="flex max-w-2xl flex-col gap-6">
           <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">
-            Turn your hackathon project into a video ad
+            Turn your{" "}
+            <RotatingWord
+              words={["hackathon", "B2B SaaS", "side", "open source", "indie", "AI", "mobile app", "weekend"]}
+            />{" "}
+            project into a video ad
           </h1>
           <p className="text-base text-fg-2">
             Paste a GitHub repo or a website. AdCity writes three billboard ads and a 20 second video with a voiceover
