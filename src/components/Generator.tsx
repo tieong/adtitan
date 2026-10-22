@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Campaign } from "@/lib/types";
 import { AdCard } from "./AdCard";
+import { VideoStudio } from "./VideoStudio";
 
 type Step = "fetch" | "understand" | "write" | "done";
 const STEPS: { key: Step; label: string }[] = [
@@ -182,6 +183,9 @@ export function Generator() {
             </div>
           </div>
           <p className="mt-4 text-sm text-white/50">{campaign.description}</p>
+          <div className="mt-8">
+            <VideoStudio key={campaign.id} campaign={campaign} autoStart />
+          </div>
         </div>
       )}
     </div>

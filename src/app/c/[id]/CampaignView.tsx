@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Campaign, CampaignStats } from "@/lib/types";
 import { AdCard } from "@/components/AdCard";
+import { VideoStudio } from "@/components/VideoStudio";
 import { Bars, Kpi } from "@/components/Kpi";
 import { visitUrl } from "@/lib/client";
 import { compact, pct } from "@/lib/format";
@@ -74,6 +75,10 @@ export function CampaignView({ initial }: { initial: Campaign }) {
         </div>
       </div>
       <p className="mt-4 max-w-2xl text-white/55">{c.description}</p>
+
+      <div id="video" className="mt-8">
+        <VideoStudio campaign={initial} />
+      </div>
 
       <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-5">
         <Kpi label="Impressions" value={compact(stats?.impressions ?? 0)} hint="≥1s on screen in the city" />
