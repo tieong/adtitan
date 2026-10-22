@@ -89,7 +89,7 @@ export function VideoStudio({ campaign, autoStart = false }: { campaign: Campaig
 
   const done = jobs?.filter((j) => j.status === "done" && j.hasVideo) ?? [];
   const latest = done.find((j) => j.format === format) ?? done[0];
-  const lastFailed = jobs?.[0]?.status === "failed" ? jobs[0] : null;
+  const lastFailed = jobs?.[0]?.status === "failed" && jobs[0].error !== "Canceled" ? jobs[0] : null;
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="video-heading">

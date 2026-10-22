@@ -7,7 +7,7 @@ import { getCampaign, getImage } from "../db";
 import { compose, type Format } from "./compose";
 import { music, sfx, voiceover } from "./audio";
 import { writeVideoScript } from "./script";
-import { createJob, saveVideo, unfinishedJobs, updateJob, type VideoJob } from "./store";
+import { createJob, saveVideo, updateJob, type VideoJob } from "./store";
 
 // Built at runtime so the bundler does not rewrite it into an asset reference.
 const GSAP = [process.cwd(), "node_modules", "gsap", "dist", "gsap.min.js"].join(path.sep);
@@ -40,21 +40,6 @@ class Gate {
 const g = globalThis as unknown as { __gates?: { prep: Gate; music: Gate; render: Gate } };
 g.__gates ??= { prep: new Gate(4), music: new Gate(2), render: new Gate(2) };
 const gates = g.__gates;
-
-// Pick up jobs a previous server process left behind, once per process.
-const resume = globalThis as unknown as { __videoResumed?: boolean };
-if (!resume.__videoResumed) {
-  resume.__videoResumed = true;
-  unfinishedJobs()
-    .then((jobs) => {
-      for (const j of jobs) {
-        void updateJob(j.id, { status: "queued", progress: 0, message: "Queued" });
-        void run(j.id, j.campaignId, j.format);
-      }
-      if (jobs.length) console.log(`[video] resumed ${jobs.length} unfinished jobs`);
-    })
-    .catch((e) => console.error("[video] resume failed", e));
-}
 
 export async function startVideo(campaignId: string, format: Format): Promise<VideoJob> {
   const job = await createJob(nanoid(12), campaignId, format);

@@ -219,12 +219,3 @@ export async function getVideo(id: string): Promise<Buffer | null> {
   return rows[0]?.video ?? null;
 }
 
-/** Jobs that never finished, e.g. because the server restarted mid-render. */
-export async function unfinishedJobs(): Promise<VideoJob[]> {
-  const p = await ready();
-  if (!p) return [];
-  const { rows } = await p.query<Row>(
-    `select ${COLS} from video_jobs where status not in ('done', 'failed') order by created_at asc`,
-  );
-  return rows.map(fromRow);
-}
